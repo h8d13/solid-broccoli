@@ -44,9 +44,11 @@ TMPHOME="$(mktemp -d /tmp/home_XXXXXX)"   # overlay merged mount point
 TMPTFS="$(mktemp -d /tmp/tfs_XXXXXX)"     # tmpfs backing upper/work (RAM only)
 BROKER_SOCK="$TMPHOME/.broker.sock"
 BROKER_PID=""
+BROKER_SCRIPT=""
 
 cleanup() {
     [[ -n "$BROKER_PID" ]] && kill "$BROKER_PID" 2>/dev/null || true
+    [[ -n "$BROKER_SCRIPT" ]] && rm -f "$BROKER_SCRIPT"
     for bm in "${BIND_MOUNTS[@]+"${BIND_MOUNTS[@]}"}"; do
         dst="${bm#*:}"
         umount "$TMPHOME/$dst" 2>/dev/null || true
@@ -167,7 +169,6 @@ PYEOF
 
     python3 "$BROKER_SCRIPT" "$BROKER_SOCK" "$TMPUID" "$TMPGID" "${WHITELIST[@]}" &
     BROKER_PID=$!
-    rm -f "$BROKER_SCRIPT"
 
     # wait for socket to appear (up to 2s)
     for i in {1..20}; do
