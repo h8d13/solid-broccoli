@@ -40,8 +40,8 @@ done
 
 # ---------- temp user + dirs ----------
 TMPUSER="tmpuser_$(openssl rand -hex 4)"
-TMPHOME="$(mktemp -d /tmp/home_XXXXXX)"   # overlay merged mount point
-TMPTFS="$(mktemp -d /tmp/tfs_XXXXXX)"     # tmpfs backing upper/work (RAM only)
+TMPHOME="$(mktemp -d /var/tmp/home_XXXXXX)"   # overlay merged mount point
+TMPTFS="$(mktemp -d /var/tmp/tfs_XXXXXX)"     # tmpfs backing upper/work (RAM only)
 BROKER_SOCK="$TMPHOME/.broker.sock"
 BROKER_PID=""
 
