@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+# run-as-root — session-side client for the root command broker
+#
+# Copied into the session's $HOME/.bin/ at launch time with the socket
+# path baked in. Sends a whitelisted command to broker.py and exits
+# with the command's exit code.
+#
+# Usage: run-as-root <command> [args...]
+
+import socket, sys, json, array
+
+SOCK = "__BROKER_SOCK__"  # replaced by user.sh at install time
+
+if len(sys.argv) < 2:
+    print("usage: run-as-root <command> [args...]", file=sys.stderr)
+    sys.exit(1)
+
+s = socket.socket(socket.AF_UNIX)
+try:
+    s.connect(SOCK)
+except OSError as e:
+    print(f"run-as-root: could not connect to broker: {e}", file=sys.stderr)
+    sys.exit(1)
+
+# send JSON command + our stdin/stdout/stderr so the broker can run the
+# command directly against our terminal (interactive prompts work)
+fds = array.array('i', [sys.stdin.fileno(), sys.stdout.fileno(), sys.stderr.fileno()])
+s.sendmsg(
+    [json.dumps(sys.argv[1:]).encode() + b"\n"],
+    [(socket.SOL_SOCKET, socket.SCM_RIGHTS, fds)],
+)
+s.shutdown(socket.SHUT_WR)
+
+raw = b""
+while chunk := s.recv(4096):
+    raw += chunk
+
+try:
+    resp = json.loads(raw.decode())
+except json.JSONDecodeError:
+    print("run-as-root: malformed response from broker", file=sys.stderr)
+    sys.exit(1)
+
+if "error" in resp:
+    print(f"run-as-root: {resp['error']}", file=sys.stderr)
+    sys.exit(1)
+
+sys.exit(resp.get("exit", 0))
