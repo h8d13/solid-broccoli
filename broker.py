@@ -8,11 +8,12 @@
 # The broker validates the command against the whitelist, runs it as root
 # with the session's actual terminal, and returns the exit code as JSON.
 
-import socket, os, sys, subprocess, json, signal, array, shutil
+import socket, os, sys, subprocess, json, signal, array, shutil, syslog
 
 # detach from the terminal's process group so background reads don't
 # get SIGTTIN when an interactive command (e.g. pacman) reads from stdin
 os.setsid()
+syslog.openlog(ident="sandbox-broker", facility=syslog.LOG_AUTH)
 
 sock_path = sys.argv[1]
 uid       = int(sys.argv[2])
@@ -78,8 +79,13 @@ def handle(conn):
 
         cmd_path = resolve(str(args[0]))
         if not cmd_path or cmd_path not in whitelist:
+            syslog.syslog(syslog.LOG_WARNING,
+                f"DENIED  uid={uid} cmd={args}")
             conn.sendall(json.dumps({"error": f"'{args[0]}' is not whitelisted"}).encode() + b"\n")
             return
+
+        syslog.syslog(syslog.LOG_INFO,
+            f"ALLOWED uid={uid} cmd={args}")
 
         # run with the session's actual stdin/stdout/stderr so interactive prompts work
         if len(passed_fds) == 3:
@@ -94,6 +100,8 @@ def handle(conn):
                 stdout=stdout_fd,
                 stderr=stderr_fd,
             )
+            syslog.syslog(syslog.LOG_INFO,
+                f"EXITED  uid={uid} cmd={args} exit={result.returncode}")
             conn.sendall(json.dumps({"exit": result.returncode}).encode() + b"\n")
         except FileNotFoundError:
             conn.sendall(json.dumps({"error": f"command not found: {args[0]}"}).encode() + b"\n")
