@@ -124,7 +124,11 @@ if [[ ${#WHITELIST[@]} -gt 0 ]]; then
 fi
 
 # ---------- resource limits ----------
-MEM_KB=$(( ${MEM_LIMIT%M} * 1024 ))
+case "$MEM_LIMIT" in
+    *G) MEM_KB=$(( ${MEM_LIMIT%G} * 1024 * 1024 )) ;;
+    *M) MEM_KB=$(( ${MEM_LIMIT%M} * 1024 ))        ;;
+    *)  echo "error: --mem must end in M or G (e.g. 512M, 2G)" >&2; exit 1 ;;
+esac
 ulimit -v "$MEM_KB"
 ulimit -n "$MAX_FILES"
 
