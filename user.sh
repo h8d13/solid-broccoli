@@ -120,17 +120,23 @@ signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
 def handle(conn):
     with conn:
-        raw = b""
-        while True:
-            chunk = conn.recv(4096)
-            if not chunk:
-                break
-            raw += chunk
-            if b"\n" in raw:
-                break
+        # receive JSON command + stdin/stdout/stderr FDs in one recvmsg call
+        fds_arr = array.array('i')
+        cmsg_space = socket.CMSG_SPACE(3 * fds_arr.itemsize)
+        try:
+            msg, ancdata, _, _ = conn.recvmsg(65536, cmsg_space)
+        except OSError as e:
+            conn.sendall(json.dumps({"error": str(e)}).encode() + b"\n")
+            return
+
+        passed_fds = []
+        for cmsg_level, cmsg_type, cmsg_data in ancdata:
+            if cmsg_level == socket.SOL_SOCKET and cmsg_type == socket.SCM_RIGHTS:
+                fds_arr.frombytes(cmsg_data[:3 * fds_arr.itemsize])
+                passed_fds = list(fds_arr[:3])
 
         try:
-            args = json.loads(raw.decode())
+            args = json.loads(msg.decode().strip())
         except json.JSONDecodeError as e:
             conn.sendall(json.dumps({"error": f"bad request: {e}"}).encode() + b"\n")
             return
@@ -144,20 +150,27 @@ def handle(conn):
             conn.sendall(json.dumps({"error": f"'{base}' is not whitelisted"}).encode() + b"\n")
             return
 
+        # use the session's actual stdin/stdout/stderr so interactive prompts work
+        stdin_fd, stdout_fd, stderr_fd = (passed_fds + [0, 1, 2])[:3]
+
         try:
             result = subprocess.run(
                 args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stdin=stdin_fd,
+                stdout=stdout_fd,
+                stderr=stderr_fd,
             )
-            conn.sendall(json.dumps({
-                "stdout": result.stdout.decode(errors="replace"),
-                "exit":   result.returncode,
-            }).encode() + b"\n")
+            conn.sendall(json.dumps({"exit": result.returncode}).encode() + b"\n")
         except FileNotFoundError:
             conn.sendall(json.dumps({"error": f"command not found: {args[0]}"}).encode() + b"\n")
         except Exception as e:
             conn.sendall(json.dumps({"error": str(e)}).encode() + b"\n")
+        finally:
+            for fd in passed_fds:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
 
 while True:
     try:
