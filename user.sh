@@ -43,6 +43,12 @@ TMPUSER="tmpuser_$(openssl rand -hex 4)"
 TMPHOME="$(mktemp -d /var/tmp/home_XXXXXX)"   # overlay merged mount point
 TMPTFS="$(mktemp -d /var/tmp/tfs_XXXXXX)"     # tmpfs backing upper/work (RAM only)
 BROKER_SOCK="$TMPHOME/.broker.sock"
+
+# persistent store — survives session, owned by the invoking user
+REAL_USER="${SUDO_USER:-root}"
+IMUT_DIR="/home/$REAL_USER/.imut"
+[[ "$REAL_USER" == "root" ]] && IMUT_DIR="/root/.imut"
+mkdir -p "$IMUT_DIR"
 BROKER_PID=""
 
 cleanup() {
@@ -56,6 +62,7 @@ cleanup() {
         done
     fi
     userdel "$TMPUSER" 2>/dev/null || true
+    umount "$TMPHOME/.imut" 2>/dev/null || true
     umount "$TMPHOME"  2>/dev/null || true
     umount "$TMPTFS"   2>/dev/null || true
     rm -rf "$TMPHOME" "$TMPTFS"
@@ -64,7 +71,12 @@ trap cleanup EXIT
 
 # ---------- overlay home (RAM-only writes) ----------
 mount -t tmpfs tmpfs "$TMPTFS"
-mkdir "$TMPTFS/upper" "$TMPTFS/work"
+mkdir "$TMPTFS/upper"           "$TMPTFS/work"
+
+# overlay dirs for system paths — all RAM-backed, gone on exit
+mkdir -p "$TMPTFS/usr/upper"    "$TMPTFS/usr/work"
+mkdir -p "$TMPTFS/pacman/upper" "$TMPTFS/pacman/work"
+mkdir -p "$TMPTFS/cache/upper"  "$TMPTFS/cache/work"
 
 mount -t overlay overlay \
     -o lowerdir=/etc/skel,upperdir="$TMPTFS/upper",workdir="$TMPTFS/work" \
@@ -84,6 +96,11 @@ chmod 700 "$TMPHOME"
 
 TMPUID=$(id -u "$TMPUSER")
 TMPGID=$(id -g "$TMPUSER")
+
+# ---------- persistent .imut ----------
+mkdir -p "$TMPHOME/.imut"
+mount --bind "$IMUT_DIR" "$TMPHOME/.imut"
+chown "${TMPUSER}:${TMPUSER}" "$TMPHOME/.imut"
 
 # ---------- read-only bind mounts ----------
 if [[ ${#BIND_MOUNTS[@]} -gt 0 ]]; then
@@ -166,8 +183,15 @@ fi
 
 # outer: runs as root inside the new namespace — mount fresh /tmp so
 # session writes can't escape the sandbox, then hand off to INNER
+SETUP="
+mount -t tmpfs tmpfs /tmp
+mount -t overlay overlay -o lowerdir=/usr,upperdir=$TMPTFS/usr/upper,workdir=$TMPTFS/usr/work /usr
+mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir=$TMPTFS/pacman/upper,workdir=$TMPTFS/pacman/work /var/lib/pacman
+mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir=$TMPTFS/cache/upper,workdir=$TMPTFS/cache/work /var/cache/pacman
+"
+
 CMD=(
-    bash -c 'mount -t tmpfs tmpfs /tmp && exec "$@"' --
+    bash -c "$SETUP && exec \"\$@\"" --
     "${INNER[@]}"
 )
 
