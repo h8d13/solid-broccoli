@@ -42,9 +42,9 @@ for entry in sys.argv[5:]:
 # overlay mount setup — runs inside a temporary mount namespace per command
 # upper dirs persist in tmptfs across calls so pacman db state accumulates
 OVERLAY_SETUP = f"""set -e
-mount -t overlay overlay -o lowerdir=/usr,upperdir={tmptfs}/usr/upper,workdir={tmptfs}/usr/work /usr
-mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir={tmptfs}/pacman/upper,workdir={tmptfs}/pacman/work /var/lib/pacman
-mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir={tmptfs}/cache/upper,workdir={tmptfs}/cache/work /var/cache/pacman
+mount -t overlay overlay -o lowerdir=/usr,upperdir={tmptfs}/usr/upper,workdir={tmptfs}/usr/work,index=off /usr
+mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir={tmptfs}/pacman/upper,workdir={tmptfs}/pacman/work,index=off /var/lib/pacman
+mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir={tmptfs}/cache/upper,workdir={tmptfs}/cache/work,index=off /var/cache/pacman
 exec "$@"
 """
 
