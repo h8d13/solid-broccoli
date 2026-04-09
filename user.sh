@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---------- temp user + dirs ----------
-TMPUSER="tmpuser_$(tr -dc 'a-f0-9' < /dev/urandom | head -c8)"
+TMPUSER="tmpuser_$(openssl rand -hex 4)"
 TMPHOME="$(mktemp -d /tmp/home_XXXXXX)"   # overlay merged mount point
 TMPTFS="$(mktemp -d /tmp/tfs_XXXXXX)"     # tmpfs backing upper/work (RAM only)
 BROKER_SOCK="$TMPHOME/.broker.sock"
