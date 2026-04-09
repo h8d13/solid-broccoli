@@ -12,13 +12,25 @@ fi
 
 # Unique throwaway username
 TMPUSER="tmpuser_$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-TMPHOME="$(mktemp -d /tmp/home_XXXXXX)"
+TMPHOME="$(mktemp -d /tmp/home_XXXXXX)"   # merged mount point
+TMPTFS="$(mktemp -d /tmp/tfs_XXXXXX)"     # tmpfs base (RAM only)
 
 cleanup() {
     userdel "$TMPUSER" 2>/dev/null || true
-    rm -rf "$TMPHOME"
+    umount "$TMPHOME"  2>/dev/null || true
+    umount "$TMPTFS"   2>/dev/null || true
+    rm -rf "$TMPHOME" "$TMPTFS"
 }
 trap cleanup EXIT
+
+# Mount a tmpfs so upper/work never touch the real disk
+mount -t tmpfs tmpfs "$TMPTFS"
+mkdir "$TMPTFS/upper" "$TMPTFS/work"
+
+# Overlay: lower=skel (read-only), upper=tmpfs (RAM writes), merged=TMPHOME
+mount -t overlay overlay \
+    -o lowerdir=/etc/skel,upperdir="$TMPTFS/upper",workdir="$TMPTFS/work" \
+    "$TMPHOME"
 
 # Create user: dedicated group, temp home, no wheel/sudo
 useradd \
