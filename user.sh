@@ -120,7 +120,7 @@ if [[ ${#WHITELIST[@]} -gt 0 ]]; then
     BROKER_SCRIPT="$(dirname "$0")/broker.py"
     [[ -f "$BROKER_SCRIPT" ]] || { echo "error: broker.py not found next to user.sh" >&2; exit 1; }
 
-    python3 "$BROKER_SCRIPT" "$BROKER_SOCK" "$TMPUID" "$TMPGID" "${WHITELIST[@]}" &
+    python3 "$BROKER_SCRIPT" "$BROKER_SOCK" "$TMPUID" "$TMPGID" "$TMPTFS" "${WHITELIST[@]}" &
     BROKER_PID=$!
     disown $BROKER_PID
 
@@ -185,9 +185,6 @@ fi
 # session writes can't escape the sandbox, then hand off to INNER
 SETUP="set -e
 mount -t tmpfs tmpfs /tmp
-mount -t overlay overlay -o lowerdir=/usr,upperdir=$TMPTFS/usr/upper,workdir=$TMPTFS/usr/work /usr
-mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir=$TMPTFS/pacman/upper,workdir=$TMPTFS/pacman/work /var/lib/pacman
-mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir=$TMPTFS/cache/upper,workdir=$TMPTFS/cache/work /var/cache/pacman
 exec \"\$@\""
 
 CMD=(

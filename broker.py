@@ -18,6 +18,7 @@ syslog.openlog(ident="sandbox-broker", facility=syslog.LOG_AUTH)
 sock_path = sys.argv[1]
 uid       = int(sys.argv[2])
 gid       = int(sys.argv[3])
+tmptfs    = sys.argv[4]
 
 
 def resolve(cmd):
@@ -31,12 +32,21 @@ def resolve(cmd):
 
 # resolve whitelist entries to full canonical paths at startup
 whitelist = set()
-for entry in sys.argv[4:]:
+for entry in sys.argv[5:]:
     path = resolve(entry)
     if path and os.path.isfile(path):
         whitelist.add(path)
     else:
         print(f"broker: warning: whitelisted command '{entry}' not found, skipping", file=sys.stderr)
+
+# overlay mount setup — runs inside a temporary mount namespace per command
+# upper dirs persist in tmptfs across calls so pacman db state accumulates
+OVERLAY_SETUP = f"""set -e
+mount -t overlay overlay -o lowerdir=/usr,upperdir={tmptfs}/usr/upper,workdir={tmptfs}/usr/work /usr
+mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir={tmptfs}/pacman/upper,workdir={tmptfs}/pacman/work /var/lib/pacman
+mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir={tmptfs}/cache/upper,workdir={tmptfs}/cache/work /var/cache/pacman
+exec "$@"
+"""
 
 if os.path.exists(sock_path):
     os.unlink(sock_path)
@@ -95,7 +105,7 @@ def handle(conn):
 
         try:
             result = subprocess.run(
-                args,
+                ["unshare", "--mount", "bash", "-c", OVERLAY_SETUP, "--"] + args,
                 stdin=stdin_fd,
                 stdout=stdout_fd,
                 stderr=stderr_fd,
