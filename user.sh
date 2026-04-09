@@ -154,7 +154,7 @@ ulimit -v "$MEM_KB"
 ulimit -n "$MAX_FILES"
 
 # ---------- namespace wrapper ----------
-UNSHARE=(unshare --fork --pid --mount-proc)
+UNSHARE=(unshare --fork --pid --mount-proc --mount)
 [[ $USE_NET_NS -eq 1 ]] && UNSHARE+=(--net)
 
 # ---------- sandboxed command ----------
@@ -181,10 +181,14 @@ else
     INNER+=(/bin/bash --login)
 fi
 
-# outer: runs as root inside the new namespace — mount fresh /tmp so
-# session writes can't escape the sandbox, then hand off to INNER
+# outer: runs as root inside the new namespace — mount fresh /tmp and
+# overlay /usr (shared upper dir with broker) so packages installed via
+# run-as-root are visible in the session, then hand off to INNER
 SETUP="set -e
 mount -t tmpfs tmpfs /tmp
+mount -t overlay overlay -o lowerdir=/usr,upperdir=$TMPTFS/usr/upper,workdir=$TMPTFS/usr/work /usr
+mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir=$TMPTFS/pacman/upper,workdir=$TMPTFS/pacman/work /var/lib/pacman
+mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir=$TMPTFS/cache/upper,workdir=$TMPTFS/cache/work /var/cache/pacman
 exec \"\$@\""
 
 CMD=(
