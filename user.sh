@@ -110,6 +110,7 @@ CMD=(
         --bounding-set=-all    # hard cap: can never re-acquire any capability
         --no-new-privs         # no suid/capability escalation ever
         --
+    env HOME="$TMPHOME" USER="$TMPUSER" LOGNAME="$TMPUSER"
 )
 
 if [[ $# -gt 0 ]]; then
