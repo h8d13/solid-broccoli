@@ -104,6 +104,10 @@ if [[ ${#WHITELIST[@]} -gt 0 ]]; then
     cat > "$BROKER_SCRIPT" << 'PYEOF'
 import socket, os, sys, subprocess, json, signal, array
 
+# detach from the terminal's process group so background reads don't
+# get SIGTTIN when pacman (or any interactive command) reads from stdin
+os.setsid()
+
 sock_path = sys.argv[1]
 uid       = int(sys.argv[2])
 gid       = int(sys.argv[3])
