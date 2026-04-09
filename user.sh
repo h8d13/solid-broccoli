@@ -141,7 +141,8 @@ UNSHARE=(unshare --fork --pid --mount-proc)
 [[ $USE_NET_NS -eq 1 ]] && UNSHARE+=(--net)
 
 # ---------- sandboxed command ----------
-CMD=(
+# inner: drop privileges and exec the session program
+INNER=(
     setpriv
         --reuid="$TMPUID"
         --regid="$TMPGID"
@@ -158,10 +159,17 @@ CMD=(
 )
 
 if [[ $# -gt 0 ]]; then
-    CMD+=("$@")
+    INNER+=("$@")
 else
-    CMD+=(/bin/bash --login)
+    INNER+=(/bin/bash --login)
 fi
+
+# outer: runs as root inside the new namespace — mount fresh /tmp so
+# session writes can't escape the sandbox, then hand off to INNER
+CMD=(
+    bash -c 'mount -t tmpfs tmpfs /tmp && exec "$@"' --
+    "${INNER[@]}"
+)
 
 echo ">> session : $TMPUSER"
 echo ">> home    : $TMPHOME (overlay, RAM-backed)"

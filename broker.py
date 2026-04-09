@@ -8,7 +8,7 @@
 # The broker validates the command against the whitelist, runs it as root
 # with the session's actual terminal, and returns the exit code as JSON.
 
-import socket, os, sys, subprocess, json, signal, array
+import socket, os, sys, subprocess, json, signal, array, shutil
 
 # detach from the terminal's process group so background reads don't
 # get SIGTTIN when an interactive command (e.g. pacman) reads from stdin
@@ -17,7 +17,25 @@ os.setsid()
 sock_path = sys.argv[1]
 uid       = int(sys.argv[2])
 gid       = int(sys.argv[3])
-whitelist = set(sys.argv[4:])
+
+
+def resolve(cmd):
+    """Return the canonical real path of a command, or None if not found."""
+    if os.path.isabs(cmd):
+        p = cmd
+    else:
+        p = shutil.which(cmd)
+    return os.path.realpath(p) if p else None
+
+
+# resolve whitelist entries to full canonical paths at startup
+whitelist = set()
+for entry in sys.argv[4:]:
+    path = resolve(entry)
+    if path and os.path.isfile(path):
+        whitelist.add(path)
+    else:
+        print(f"broker: warning: whitelisted command '{entry}' not found, skipping", file=sys.stderr)
 
 if os.path.exists(sock_path):
     os.unlink(sock_path)
@@ -58,9 +76,9 @@ def handle(conn):
             conn.sendall(json.dumps({"error": "request must be a non-empty JSON array"}).encode() + b"\n")
             return
 
-        base = os.path.basename(str(args[0]))
-        if base not in whitelist:
-            conn.sendall(json.dumps({"error": f"'{base}' is not whitelisted"}).encode() + b"\n")
+        cmd_path = resolve(str(args[0]))
+        if not cmd_path or cmd_path not in whitelist:
+            conn.sendall(json.dumps({"error": f"'{args[0]}' is not whitelisted"}).encode() + b"\n")
             return
 
         # run with the session's actual stdin/stdout/stderr so interactive prompts work
