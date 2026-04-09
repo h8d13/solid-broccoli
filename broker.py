@@ -64,7 +64,10 @@ def handle(conn):
             return
 
         # run with the session's actual stdin/stdout/stderr so interactive prompts work
-        stdin_fd, stdout_fd, stderr_fd = (passed_fds + [0, 1, 2])[:3]
+        if len(passed_fds) == 3:
+            stdin_fd, stdout_fd, stderr_fd = passed_fds
+        else:
+            stdin_fd, stdout_fd, stderr_fd = 0, 1, 2
 
         try:
             result = subprocess.run(

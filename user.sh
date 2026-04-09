@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---------- temp user + dirs ----------
-TMPUSER="tmpuser_$(head -c4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+TMPUSER="tmpuser_$(tr -dc 'a-f0-9' < /dev/urandom | head -c8)"
 TMPHOME="$(mktemp -d /tmp/home_XXXXXX)"   # overlay merged mount point
 TMPTFS="$(mktemp -d /tmp/tfs_XXXXXX)"     # tmpfs backing upper/work (RAM only)
 BROKER_SOCK="$TMPHOME/.broker.sock"
@@ -49,10 +49,12 @@ cleanup() {
     echo ""
     echo ">> session ended — user, home, and all writes cleaned up"
     [[ -n "$BROKER_PID" ]] && kill "$BROKER_PID" 2>/dev/null || true
-    for bm in "${BIND_MOUNTS[@]+"${BIND_MOUNTS[@]}"}"; do
-        dst="${bm#*:}"
-        umount "$TMPHOME/$dst" 2>/dev/null || true
-    done
+    if [[ ${#BIND_MOUNTS[@]} -gt 0 ]]; then
+        for bm in "${BIND_MOUNTS[@]}"; do
+            dst="${bm#*:}"
+            umount "$TMPHOME/$dst" 2>/dev/null || true
+        done
+    fi
     userdel "$TMPUSER" 2>/dev/null || true
     umount "$TMPHOME"  2>/dev/null || true
     umount "$TMPTFS"   2>/dev/null || true
@@ -84,14 +86,16 @@ TMPUID=$(id -u "$TMPUSER")
 TMPGID=$(id -g "$TMPUSER")
 
 # ---------- read-only bind mounts ----------
-for bm in "${BIND_MOUNTS[@]+"${BIND_MOUNTS[@]}"}"; do
-    src="${bm%%:*}"
-    dst="${bm#*:}"
-    mkdir -p "$TMPHOME/$dst"
-    mount --bind "$src" "$TMPHOME/$dst"
-    mount -o remount,ro,bind "$TMPHOME/$dst"
-    echo ">> bind (ro): $src -> \$HOME/$dst"
-done
+if [[ ${#BIND_MOUNTS[@]} -gt 0 ]]; then
+    for bm in "${BIND_MOUNTS[@]}"; do
+        src="${bm%%:*}"
+        dst="${bm#*:}"
+        mkdir -p "$TMPHOME/$dst"
+        mount --bind "$src" "$TMPHOME/$dst"
+        mount -o remount,ro,bind "$TMPHOME/$dst"
+        echo ">> bind (ro): $src -> \$HOME/$dst"
+    done
+fi
 
 # ---------- broker ----------
 if [[ ${#WHITELIST[@]} -gt 0 ]]; then
@@ -150,7 +154,7 @@ CMD=(
         HOME="$TMPHOME"
         USER="$TMPUSER"
         LOGNAME="$TMPUSER"
-        PATH="$TMPHOME/.bin:/usr/local/bin:/usr/bin:/bin"
+        PATH="${BROKER_PID:+$TMPHOME/.bin:}/usr/local/bin:/usr/bin:/bin"
 )
 
 if [[ $# -gt 0 ]]; then
