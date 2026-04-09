@@ -172,7 +172,7 @@ INNER=(
         HOME="$TMPHOME"
         USER="$TMPUSER"
         LOGNAME="$TMPUSER"
-        PATH="${BROKER_PID:+$TMPHOME/.bin:}/usr/local/bin:/usr/bin:/bin"
+        PATH="${BROKER_PID:+$TMPHOME/.bin:}$TMPTFS/usr/upper/local/bin:$TMPTFS/usr/upper/bin:/usr/local/bin:/usr/bin:/bin"
 )
 
 if [[ $# -gt 0 ]]; then
