@@ -47,6 +47,8 @@ BROKER_PID=""
 BROKER_SCRIPT=""
 
 cleanup() {
+    echo ""
+    echo ">> session ended — user, home, and all writes cleaned up"
     [[ -n "$BROKER_PID" ]] && kill "$BROKER_PID" 2>/dev/null || true
     [[ -n "$BROKER_SCRIPT" ]] && rm -f "$BROKER_SCRIPT"
     for bm in "${BIND_MOUNTS[@]+"${BIND_MOUNTS[@]}"}"; do
@@ -100,7 +102,7 @@ if [[ ${#WHITELIST[@]} -gt 0 ]]; then
     BROKER_SCRIPT="$(mktemp /tmp/broker_XXXXXX.py)"
 
     cat > "$BROKER_SCRIPT" << 'PYEOF'
-import socket, os, sys, subprocess, json, signal
+import socket, os, sys, subprocess, json, signal, array
 
 sock_path = sys.argv[1]
 uid       = int(sys.argv[2])
@@ -194,7 +196,7 @@ PYEOF
     mkdir -p "$TMPHOME/.bin"
     cat > "$TMPHOME/.bin/run-as-root" << CLIENTEOF
 #!/usr/bin/env python3
-import socket, os, sys, json
+import socket, sys, json, array
 
 SOCK = "$BROKER_SOCK"
 
@@ -209,7 +211,13 @@ except OSError as e:
     print(f"run-as-root: could not connect to broker: {e}", file=sys.stderr)
     sys.exit(1)
 
-s.sendall(json.dumps(sys.argv[1:]).encode() + b"\n")
+# send JSON command + our stdin/stdout/stderr in one message so the
+# broker can run the command directly against our terminal (interactive prompts work)
+fds = array.array('i', [sys.stdin.fileno(), sys.stdout.fileno(), sys.stderr.fileno()])
+s.sendmsg(
+    [json.dumps(sys.argv[1:]).encode() + b"\n"],
+    [(socket.SOL_SOCKET, socket.SCM_RIGHTS, fds)],
+)
 s.shutdown(socket.SHUT_WR)
 
 raw = b""
@@ -226,7 +234,6 @@ if "error" in resp:
     print(f"run-as-root: {resp['error']}", file=sys.stderr)
     sys.exit(1)
 
-print(resp.get("stdout", ""), end="")
 sys.exit(resp.get("exit", 0))
 CLIENTEOF
 
@@ -275,7 +282,5 @@ echo ">> mem     : ${MEM_LIMIT} virt  |  files: ${MAX_FILES}"
 echo ">> net     : $([ $USE_NET_NS -eq 1 ] && echo 'isolated (loopback only)' || echo 'host')"
 echo ""
 
+set +e
 "${UNSHARE[@]}" "${CMD[@]}"
-
-echo ""
-echo ">> session ended — user, home, and all writes cleaned up"
