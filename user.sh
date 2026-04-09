@@ -184,6 +184,7 @@ PYEOF
 
     python3 "$BROKER_SCRIPT" "$BROKER_SOCK" "$TMPUID" "$TMPGID" "${WHITELIST[@]}" &
     BROKER_PID=$!
+    disown $BROKER_PID
 
     # wait for socket to appear (up to 2s)
     for i in {1..20}; do
