@@ -102,7 +102,12 @@ if [[ ${#WHITELIST[@]} -gt 0 ]]; then
     BROKER_SCRIPT="$(mktemp /tmp/broker_XXXXXX.py)"
 
     cat > "$BROKER_SCRIPT" << 'PYEOF'
-import socket, os, sys, subprocess, json, signal, array
+import socket, os, sys, subprocess, json, signal, array, resource
+
+# broker inherits ulimits from the parent shell — remove them so root
+# commands (e.g. pacman) aren't constrained by the session's limits
+resource.setrlimit(resource.RLIMIT_AS,    (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+resource.setrlimit(resource.RLIMIT_NOFILE, (65536, 65536))
 
 sock_path = sys.argv[1]
 uid       = int(sys.argv[2])
