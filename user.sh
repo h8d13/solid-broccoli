@@ -183,15 +183,15 @@ fi
 
 # outer: runs as root inside the new namespace — mount fresh /tmp so
 # session writes can't escape the sandbox, then hand off to INNER
-SETUP="
+SETUP="set -e
 mount -t tmpfs tmpfs /tmp
 mount -t overlay overlay -o lowerdir=/usr,upperdir=$TMPTFS/usr/upper,workdir=$TMPTFS/usr/work /usr
 mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir=$TMPTFS/pacman/upper,workdir=$TMPTFS/pacman/work /var/lib/pacman
 mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir=$TMPTFS/cache/upper,workdir=$TMPTFS/cache/work /var/cache/pacman
-"
+exec \"\$@\""
 
 CMD=(
-    bash -c "$SETUP && exec \"\$@\"" --
+    bash -c "$SETUP" --
     "${INNER[@]}"
 )
 
