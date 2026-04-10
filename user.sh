@@ -126,6 +126,7 @@ mkdir "$TMPTFS/upper"           "$TMPTFS/work"
 
 # overlay dirs for system paths — all RAM-backed, gone on exit
 mkdir -p "$TMPTFS/usr/upper"    "$TMPTFS/usr/work"
+mkdir -p "$TMPTFS/etc/upper"    "$TMPTFS/etc/work"
 mkdir -p "$TMPTFS/pacman/upper" "$TMPTFS/pacman/work"
 mkdir -p "$TMPTFS/cache/upper"  "$TMPTFS/cache/work"
 
@@ -413,6 +414,7 @@ mount -t tmpfs -o nosuid,nodev,mode=1777 tmpfs /tmp
 
 # usr/pacman overlays: session writes land in RAM-backed upper, host lower is read-only
 mount -t overlay overlay -o nosuid,nodev,lowerdir=/usr,upperdir=$TMPTFS/usr/upper,workdir=$TMPTFS/usr/work,index=off /usr
+mount -t overlay overlay -o nosuid,nodev,lowerdir=/etc,upperdir=$TMPTFS/etc/upper,workdir=$TMPTFS/etc/work,index=off /etc
 mount -t overlay overlay -o nosuid,nodev,lowerdir=/var/lib/pacman,upperdir=$TMPTFS/pacman/upper,workdir=$TMPTFS/pacman/work,index=off /var/lib/pacman
 mount -t overlay overlay -o nosuid,nodev,lowerdir=/var/cache/pacman,upperdir=$TMPTFS/cache/upper,workdir=$TMPTFS/cache/work,index=off /var/cache/pacman
 
