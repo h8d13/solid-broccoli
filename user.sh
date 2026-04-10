@@ -478,7 +478,6 @@ for _f in /proc/cpuinfo /proc/version /proc/swaps /proc/diskstats /proc/partitio
 done
 mount --bind $TMPTFS/meminfo /proc/meminfo
 
-cd $TMPHOME
 exec \"\$@\""
 
 CMD=(
