@@ -258,6 +258,22 @@ case "$MEM_LIMIT" in
     *)  echo "error: --mem must end in M or G (e.g. 512M, 2G)" >&2; exit 1 ;;
 esac
 
+# ---------- fake /proc files ----------
+MEM_KB=$(( MEM_BYTES / 1024 ))
+cat > "$TMPTFS/meminfo" <<EOF
+MemTotal:       ${MEM_KB} kB
+MemFree:        ${MEM_KB} kB
+MemAvailable:   ${MEM_KB} kB
+Buffers:               0 kB
+Cached:                0 kB
+SwapCached:            0 kB
+Active:                0 kB
+Inactive:              0 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Dirty:                 0 kB
+EOF
+
 # ---------- namespace wrapper ----------
 UNSHARE=(unshare --fork --pid --mount-proc --mount --uts)
 [[ $USE_NET_NS -eq 1 ]] && UNSHARE+=(--net)
@@ -307,6 +323,10 @@ mount -t tmpfs tmpfs /sys/class/drm
 mount -t tmpfs tmpfs /sys/bus/pci
 mount --bind /dev/null /proc/cpuinfo
 mount --bind /dev/null /proc/version
+mount --bind $TMPTFS/meminfo /proc/meminfo
+mount --bind /dev/null /proc/swaps
+mount --bind /dev/null /proc/diskstats
+mount --bind /dev/null /proc/partitions
 exec \"\$@\""
 
 CMD=(
