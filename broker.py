@@ -4,9 +4,10 @@
 # Usage: python3 broker.py <sock_path> <uid> <gid> <cmd> [<cmd> ...]
 #
 # Listens on a Unix socket owned by the session user. Each connection sends
-# a JSON array of args + the session's stdin/stdout/stderr via SCM_RIGHTS.
-# The broker validates the command against the whitelist, runs it as root
-# with the session's actual terminal, and returns the exit code as JSON.
+# a JSON array of args + the session's mount ns fd + stdin/stdout/stderr via
+# SCM_RIGHTS. The broker enters the session's mount namespace with nsenter so
+# commands see the session's overlay directly (packages installed via pacman
+# are immediately visible). Returns the exit code as JSON.
 
 import socket, os, sys, subprocess, json, signal, array, shutil, syslog, select, struct
 
@@ -18,7 +19,6 @@ syslog.openlog(ident="sandbox-broker", facility=syslog.LOG_AUTH)
 sock_path = sys.argv[1]
 uid       = int(sys.argv[2])
 gid       = int(sys.argv[3])
-tmptfs    = sys.argv[4]
 
 
 def resolve(cmd):
@@ -32,22 +32,12 @@ def resolve(cmd):
 
 # resolve whitelist entries to full canonical paths at startup
 whitelist = set()
-for entry in sys.argv[5:]:
+for entry in sys.argv[4:]:
     path = resolve(entry)
     if path and os.path.isfile(path):
         whitelist.add(path)
     else:
         print(f"broker: warning: whitelisted command '{entry}' not found, skipping", file=sys.stderr)
-
-# overlay mount setup — runs inside a temporary mount namespace per command
-# upper dirs persist in tmptfs across calls so pacman db state accumulates
-OVERLAY_SETUP = f"""set -e
-mount -t overlay overlay -o lowerdir=/usr,upperdir={tmptfs}/usr/upper,workdir={tmptfs}/usr/work,index=off /usr
-mount -t overlay overlay -o lowerdir=/etc,upperdir={tmptfs}/etc/upper,workdir={tmptfs}/etc/work,index=off /etc
-mount -t overlay overlay -o lowerdir=/var/lib,upperdir={tmptfs}/varlib/upper,workdir={tmptfs}/varlib/work,index=off /var/lib
-mount -t overlay overlay -o lowerdir=/var/cache,upperdir={tmptfs}/varcache/upper,workdir={tmptfs}/varcache/work,index=off /var/cache
-exec "$@"
-"""
 
 if os.path.exists(sock_path):
     os.unlink(sock_path)
@@ -83,9 +73,9 @@ def handle(conn):
             conn.sendall(json.dumps({"error": "permission denied"}).encode() + b"\n")
             return
 
-        # receive JSON command + stdin/stdout/stderr FDs in one recvmsg call
+        # receive JSON command + ns_fd + stdin/stdout/stderr FDs in one recvmsg call
         fds_arr    = array.array('i')
-        cmsg_space = socket.CMSG_SPACE(3 * fds_arr.itemsize)
+        cmsg_space = socket.CMSG_SPACE(4 * fds_arr.itemsize)
         try:
             msg, ancdata, _, _ = conn.recvmsg(65536, cmsg_space)
         except OSError as e:
@@ -95,8 +85,8 @@ def handle(conn):
         passed_fds = []
         for cmsg_level, cmsg_type, cmsg_data in ancdata:
             if cmsg_level == socket.SOL_SOCKET and cmsg_type == socket.SCM_RIGHTS:
-                fds_arr.frombytes(cmsg_data[:3 * fds_arr.itemsize])
-                passed_fds = list(fds_arr[:3])
+                fds_arr.frombytes(cmsg_data[:4 * fds_arr.itemsize])
+                passed_fds = list(fds_arr[:4])
 
         try:
             args = json.loads(msg.decode().strip())
@@ -119,18 +109,23 @@ def handle(conn):
             f"ALLOWED uid={uid} cmd={args}")
 
         # run with the session's actual stdin/stdout/stderr so interactive prompts work
-        if len(passed_fds) == 3:
-            stdin_fd, stdout_fd, stderr_fd = passed_fds
+        if len(passed_fds) == 4:
+            ns_fd, stdin_fd, stdout_fd, stderr_fd = passed_fds
         else:
-            stdin_fd, stdout_fd, stderr_fd = 0, 1, 2
+            ns_fd, stdin_fd, stdout_fd, stderr_fd = None, 0, 1, 2
+
+        # nsenter the session's mount namespace so the command sees the session's
+        # overlay directly — installed packages are immediately visible in the session
+        cmd_prefix = ["nsenter", f"--mount=/proc/self/fd/{ns_fd}"] if ns_fd is not None else []
 
         try:
             proc = subprocess.Popen(
-                ["unshare", "--mount", "bash", "-c", OVERLAY_SETUP, "--"] + args,
+                cmd_prefix + args,
                 stdin=stdin_fd,
                 stdout=stdout_fd,
                 stderr=stderr_fd,
                 start_new_session=True,
+                pass_fds=(ns_fd,) if ns_fd is not None else (),
             )
         except FileNotFoundError:
             conn.sendall(json.dumps({"error": f"command not found: {args[0]}"}).encode() + b"\n")
@@ -138,6 +133,14 @@ def handle(conn):
         except Exception as e:
             conn.sendall(json.dumps({"error": str(e)}).encode() + b"\n")
             return
+
+        # ns_fd no longer needed — child has its own copy via pass_fds
+        if ns_fd is not None:
+            try:
+                os.close(ns_fd)
+            except OSError:
+                pass
+            passed_fds = [stdin_fd, stdout_fd, stderr_fd]
 
         # Poll for client disconnect while the subprocess runs.
         # run-as-root keeps the connection open (no shutdown), so any
@@ -173,10 +176,11 @@ def handle(conn):
             pass  # client already gone
         finally:
             for fd in passed_fds:
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
 
 
 while True:

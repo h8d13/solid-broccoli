@@ -5,6 +5,8 @@
 A Linux sandbox that creates a throwaway user session on demand.
 Every write is RAM-backed and gone on exit host filesystem is never touched.
 
+The goal was simply to run sway under a tmp user with some things backed in.
+
 ## Launch
 `sudo ./user.sh [options]` sets up the session:
 - Creates a temporary user (`tmpuser_XXXX`) with a random name

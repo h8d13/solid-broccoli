@@ -389,7 +389,7 @@ if [[ ${#WHITELIST[@]} -gt 0 ]]; then
     BROKER_SCRIPT="$(dirname "$0")/broker.py"
     [[ -f "$BROKER_SCRIPT" ]] || { echo "error: broker.py not found next to user.sh" >&2; exit 1; }
 
-    python3 "$BROKER_SCRIPT" "$BROKER_SOCK" "$TMPUID" "$TMPGID" "$TMPTFS" "${WHITELIST[@]}" &
+    python3 "$BROKER_SCRIPT" "$BROKER_SOCK" "$TMPUID" "$TMPGID" "${WHITELIST[@]}" &
     BROKER_PID=$!
     disown $BROKER_PID
 

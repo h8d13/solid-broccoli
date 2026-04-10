@@ -7,7 +7,7 @@
 #
 # Usage: run-as-root <command> [args...]
 
-import socket, sys, json, array
+import socket, sys, json, array, os
 
 SOCK = "__BROKER_SOCK__"  # replaced by user.sh at install time
 
@@ -22,13 +22,15 @@ except OSError as e:
     print(f"run-as-root: could not connect to broker: {e}", file=sys.stderr)
     sys.exit(1)
 
-# send JSON command + our stdin/stdout/stderr so the broker can run the
-# command directly against our terminal (interactive prompts work)
-fds = array.array('i', [sys.stdin.fileno(), sys.stdout.fileno(), sys.stderr.fileno()])
+# send JSON command + mount namespace fd + stdin/stdout/stderr so the broker
+# can nsenter our mount namespace and run directly against our terminal
+ns_fd = os.open("/proc/self/ns/mnt", os.O_RDONLY)
+fds = array.array('i', [ns_fd, sys.stdin.fileno(), sys.stdout.fileno(), sys.stderr.fileno()])
 s.sendmsg(
     [json.dumps(sys.argv[1:]).encode() + b"\n"],
     [(socket.SOL_SOCKET, socket.SCM_RIGHTS, fds)],
 )
+os.close(ns_fd)
 # intentionally no shutdown(SHUT_WR) — keeping the connection open lets the
 # broker detect our disconnect (Ctrl+C → s.close()) and kill its subprocess
 
