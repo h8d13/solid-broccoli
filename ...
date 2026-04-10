@@ -30,10 +30,11 @@ When bash exits the PID namespace dies, killing all background services instantl
 - Run `sv setup sway && sv start sway` inside the session to start a compositor
 
 ### Root broker
-- `--allow <cmd>`: whitelists a command the session can run as root
+- `--allow <cmd>`: whitelists a command the session can run as root (repeat for multiple)
 - `run-as-root <cmd>` inside the session sends the command to `broker.py` over a Unix socket
 - Broker nsenter's the session's own mount namespace, then unshares a fresh PID namespace with a clean `/proc`
 - Commands run as root with full access to the session's live overlay — installed packages are visible immediately
+- Example: `sudo ./user.sh --wayland --allow pacman --allow reflector`
 
 ## Services (sv)
 `sv` manages background processes inside the session:
@@ -47,6 +48,15 @@ sv status <name>            check if running
 
 Services live in `$SVDIR/<name>/run`. A `down` file prevents auto-start.
 Any service started at session-init time is killed automatically when the session ends.
+
+The `--temp` flag uses an ephemeral service dir (`$SVDIR_TEMP`) that is gone when the session exits:
+
+```
+sv --temp setup <name> [command]   ephemeral service, not persisted to ~/.imut
+sv --temp start  <name>
+```
+
+Persistent services (no `--temp`) live in `~/.imut/sv/` and auto-start on the next session.
 
 ## Persistent store (~/.imut)
 
