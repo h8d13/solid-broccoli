@@ -112,8 +112,9 @@ cleanup() {
     [[ -n "$ETH_NETNS" ]] && ip netns del "$ETH_NETNS" 2>/dev/null || true
     if [[ -n "$WAYLAND_SOCK" ]]; then
         chmod 600 "$HOST_XDG/$WAYLAND_SOCK" 2>/dev/null || true
-        umount "$TMPHOME/.run/$WAYLAND_SOCK" 2>/dev/null || true
+        umount "/run/user/$TMPUID/$WAYLAND_SOCK" 2>/dev/null || true
     fi
+    [[ $USE_WAYLAND -eq 1 ]] && rm -rf "/run/user/$TMPUID" 2>/dev/null || true
     umount "$TMPHOME/.imut" 2>/dev/null || true
     umount "$TMPHOME"  2>/dev/null || true
     umount "$TMPTFS"   2>/dev/null || true
@@ -254,11 +255,11 @@ fi
 
 # ---------- Wayland (--wayland) ----------
 if [[ $USE_WAYLAND -eq 1 ]]; then
-    # session XDG_RUNTIME_DIR inside home — always created
-    SESSION_XDG="$TMPHOME/.run"
+    # XDG_RUNTIME_DIR — seatd does not create this, we must
+    SESSION_XDG="/run/user/$TMPUID"
     mkdir -p "$SESSION_XDG"
+    chown "${TMPUID}:${TMPGID}" "$SESSION_XDG"
     chmod 700 "$SESSION_XDG"
-    chown "${TMPUSER}:${TMPUSER}" "$SESSION_XDG"
 
     # try to find a host Wayland socket to forward (nested mode)
     REAL_UID=$(id -u "$REAL_USER")
@@ -402,7 +403,7 @@ SESSION_ENV=(
 
 if [[ $USE_WAYLAND -eq 1 ]]; then
     SESSION_ENV+=(
-        XDG_RUNTIME_DIR="$TMPHOME/.run"
+        XDG_RUNTIME_DIR="/run/user/$TMPUID"
         XDG_SESSION_TYPE=wayland
     )
     if [[ -n "$WAYLAND_SOCK" ]]; then
