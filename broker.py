@@ -73,9 +73,9 @@ def handle(conn):
             conn.sendall(json.dumps({"error": "permission denied"}).encode() + b"\n")
             return
 
-        # receive JSON command + ns_fd + stdin/stdout/stderr FDs in one recvmsg call
+        # receive JSON command + mnt_fd + pid_fd + stdin/stdout/stderr FDs in one recvmsg call
         fds_arr    = array.array('i')
-        cmsg_space = socket.CMSG_SPACE(4 * fds_arr.itemsize)
+        cmsg_space = socket.CMSG_SPACE(5 * fds_arr.itemsize)
         try:
             msg, ancdata, _, _ = conn.recvmsg(65536, cmsg_space)
         except OSError as e:
@@ -85,8 +85,8 @@ def handle(conn):
         passed_fds = []
         for cmsg_level, cmsg_type, cmsg_data in ancdata:
             if cmsg_level == socket.SOL_SOCKET and cmsg_type == socket.SCM_RIGHTS:
-                fds_arr.frombytes(cmsg_data[:4 * fds_arr.itemsize])
-                passed_fds = list(fds_arr[:4])
+                fds_arr.frombytes(cmsg_data[:5 * fds_arr.itemsize])
+                passed_fds = list(fds_arr[:5])
 
         try:
             args = json.loads(msg.decode().strip())
@@ -109,14 +109,25 @@ def handle(conn):
             f"ALLOWED uid={uid} cmd={args}")
 
         # run with the session's actual stdin/stdout/stderr so interactive prompts work
-        if len(passed_fds) == 4:
-            ns_fd, stdin_fd, stdout_fd, stderr_fd = passed_fds
+        if len(passed_fds) == 5:
+            mnt_fd, pid_fd, stdin_fd, stdout_fd, stderr_fd = passed_fds
         else:
-            ns_fd, stdin_fd, stdout_fd, stderr_fd = None, 0, 1, 2
+            mnt_fd, pid_fd, stdin_fd, stdout_fd, stderr_fd = None, None, 0, 1, 2
 
-        # nsenter the session's mount namespace so the command sees the session's
-        # overlay directly — installed packages are immediately visible in the session
-        cmd_prefix = ["nsenter", f"--mount=/proc/self/fd/{ns_fd}"] if ns_fd is not None else []
+        # nsenter both the mount and PID namespaces so the command sees the session's
+        # overlay and a valid /proc/self — required for pacman to read mount points
+        if mnt_fd is not None and pid_fd is not None:
+            cmd_prefix = [
+                "nsenter",
+                f"--mount=/proc/self/fd/{mnt_fd}",
+                f"--pid=/proc/self/fd/{pid_fd}",
+                "--fork",
+                "--",
+            ]
+            ns_fds = (mnt_fd, pid_fd)
+        else:
+            cmd_prefix = []
+            ns_fds = ()
 
         try:
             proc = subprocess.Popen(
@@ -125,7 +136,7 @@ def handle(conn):
                 stdout=stdout_fd,
                 stderr=stderr_fd,
                 start_new_session=True,
-                pass_fds=(ns_fd,) if ns_fd is not None else (),
+                pass_fds=ns_fds,
             )
         except FileNotFoundError:
             conn.sendall(json.dumps({"error": f"command not found: {args[0]}"}).encode() + b"\n")
@@ -134,13 +145,13 @@ def handle(conn):
             conn.sendall(json.dumps({"error": str(e)}).encode() + b"\n")
             return
 
-        # ns_fd no longer needed — child has its own copy via pass_fds
-        if ns_fd is not None:
+        # namespace fds no longer needed — child has its own copies via pass_fds
+        for fd in ns_fds:
             try:
-                os.close(ns_fd)
+                os.close(fd)
             except OSError:
                 pass
-            passed_fds = [stdin_fd, stdout_fd, stderr_fd]
+        passed_fds = [stdin_fd, stdout_fd, stderr_fd]
 
         # Poll for client disconnect while the subprocess runs.
         # run-as-root keeps the connection open (no shutdown), so any
@@ -176,11 +187,10 @@ def handle(conn):
             pass  # client already gone
         finally:
             for fd in passed_fds:
-                if fd is not None:
-                    try:
-                        os.close(fd)
-                    except OSError:
-                        pass
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
 
 
 while True:
