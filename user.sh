@@ -8,6 +8,7 @@
 #   --files <n>          max open file descriptors (default: 1024)
 #   --bind  <src>:<dst>  bind-mount src read-only into session home at dst
 #   --no-net             isolated loopback-only network namespace
+#   --eth                veth pair + bridge with a random ULA IPv6 address
 #   --allow <cmd>        whitelist a command the session can run as root (repeatable)
 #   --                   end of options; everything after is the program + args
 
@@ -23,7 +24,11 @@ MEM_LIMIT="512M"
 MAX_FILES=1024
 BIND_MOUNTS=()
 USE_NET_NS=0
+USE_ETH=0
 WHITELIST=()
+ETH_BRIDGE=""
+ETH_NETNS=""
+ETH_VETH_HOST=""
 
 # ---------- parse options ----------
 while [[ $# -gt 0 ]]; do
@@ -32,6 +37,7 @@ while [[ $# -gt 0 ]]; do
         --files)  MAX_FILES="$2";      shift 2 ;;
         --bind)   BIND_MOUNTS+=("$2"); shift 2 ;;
         --no-net) USE_NET_NS=1;        shift   ;;
+        --eth)    USE_ETH=1;           shift   ;;
         --allow)  WHITELIST+=("$2");   shift 2 ;;
         --)       shift; break ;;
         *)        break ;;
@@ -62,6 +68,11 @@ cleanup() {
         done
     fi
     userdel "$TMPUSER" 2>/dev/null || true
+    if [[ -n "$ETH_BRIDGE" ]]; then
+        ip link set "$ETH_BRIDGE" down 2>/dev/null || true
+        ip link del "$ETH_BRIDGE"     2>/dev/null || true
+    fi
+    [[ -n "$ETH_NETNS" ]] && ip netns del "$ETH_NETNS" 2>/dev/null || true
     umount "$TMPHOME/.imut" 2>/dev/null || true
     umount "$TMPHOME"  2>/dev/null || true
     umount "$TMPTFS"   2>/dev/null || true
@@ -96,6 +107,41 @@ chmod 700 "$TMPHOME"
 
 TMPUID=$(id -u "$TMPUSER")
 TMPGID=$(id -g "$TMPUSER")
+TMPHOSTNAME="sandbox-${TMPUSER#tmpuser_}"
+
+if [[ $USE_NET_NS -eq 1 && $USE_ETH -eq 1 ]]; then
+    echo "error: --no-net and --eth are mutually exclusive" >&2; exit 1
+fi
+
+# ---------- veth + bridge (--eth) ----------
+if [[ $USE_ETH -eq 1 ]]; then
+    HEX="${TMPUSER#tmpuser_}"
+    ETH_NETNS="ns-$HEX"
+    ETH_VETH_HOST="veth-h-$HEX"
+    ETH_BRIDGE="br-$HEX"
+
+    # random ULA prefix: fdXX:XXXX:XXXX::/64
+    R=$(openssl rand -hex 6)
+    ETH_IPV6_HOST="fd${R:0:2}:${R:2:4}:${R:6:4}::1"
+    ETH_IPV6_CONT="fd${R:0:2}:${R:2:4}:${R:6:4}::2"
+
+    ip netns add "$ETH_NETNS"
+    # create veth pair — container end lands directly in the netns
+    ip link add "$ETH_VETH_HOST" type veth peer name eth0 netns "$ETH_NETNS"
+
+    # host side: attach to bridge, bring up
+    ip link add "$ETH_BRIDGE" type bridge
+    ip link set "$ETH_VETH_HOST" master "$ETH_BRIDGE"
+    ip -6 addr add "${ETH_IPV6_HOST}/64" dev "$ETH_BRIDGE"
+    ip link set "$ETH_VETH_HOST" up
+    ip link set "$ETH_BRIDGE" up
+
+    # container side: configure inside the netns
+    ip netns exec "$ETH_NETNS" ip link set lo up
+    ip netns exec "$ETH_NETNS" ip link set eth0 up
+    ip netns exec "$ETH_NETNS" ip -6 addr add "${ETH_IPV6_CONT}/64" dev eth0
+    ip netns exec "$ETH_NETNS" ip -6 route add default via "$ETH_IPV6_HOST" dev eth0
+fi
 
 # ---------- persistent .imut ----------
 mkdir -p "$TMPHOME/.imut"
@@ -146,20 +192,23 @@ fi
 
 # ---------- resource limits ----------
 case "$MEM_LIMIT" in
-    *G) MEM_KB=$(( ${MEM_LIMIT%G} * 1024 * 1024 )) ;;
-    *M) MEM_KB=$(( ${MEM_LIMIT%M} * 1024 ))        ;;
+    *G) MEM_BYTES=$(( ${MEM_LIMIT%G} * 1024 * 1024 * 1024 )) ;;
+    *M) MEM_BYTES=$(( ${MEM_LIMIT%M} * 1024 * 1024 ))        ;;
     *)  echo "error: --mem must end in M or G (e.g. 512M, 2G)" >&2; exit 1 ;;
 esac
-ulimit -v "$MEM_KB"
-ulimit -n "$MAX_FILES"
 
 # ---------- namespace wrapper ----------
-UNSHARE=(unshare --fork --pid --mount-proc --mount)
+UNSHARE=(unshare --fork --pid --mount-proc --mount --uts)
 [[ $USE_NET_NS -eq 1 ]] && UNSHARE+=(--net)
 
 # ---------- sandboxed command ----------
-# inner: drop privileges and exec the session program
+# inner: apply resource limits then drop privileges and exec the session program
+# prlimit is used instead of ulimit so limits apply only to the child, not user.sh
 INNER=(
+    prlimit
+        "--as=$MEM_BYTES"
+        "--nofile=$MAX_FILES"
+        --
     setpriv
         --reuid="$TMPUID"
         --regid="$TMPGID"
@@ -185,6 +234,7 @@ fi
 # overlay /usr (shared upper dir with broker) so packages installed via
 # run-as-root are visible in the session, then hand off to INNER
 SETUP="set -e
+hostname $TMPHOSTNAME
 mount -t tmpfs tmpfs /tmp
 mount -t overlay overlay -o lowerdir=/usr,upperdir=$TMPTFS/usr/upper,workdir=$TMPTFS/usr/work,index=off /usr
 mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir=$TMPTFS/pacman/upper,workdir=$TMPTFS/pacman/work,index=off /var/lib/pacman
@@ -196,10 +246,23 @@ CMD=(
     "${INNER[@]}"
 )
 
+# --eth: enter the named netns rather than letting unshare create a fresh one
+if [[ $USE_ETH -eq 1 ]]; then
+    CMD=(nsenter --net=/run/netns/"$ETH_NETNS" -- "${CMD[@]}")
+fi
+
 echo ">> session : $TMPUSER"
+echo ">> hostname: $TMPHOSTNAME"
 echo ">> home    : $TMPHOME (overlay, RAM-backed)"
 echo ">> mem     : ${MEM_LIMIT} virt  |  files: ${MAX_FILES}"
-echo ">> net     : $([ $USE_NET_NS -eq 1 ] && echo 'isolated (loopback only)' || echo 'host')"
+if [[ $USE_ETH -eq 1 ]]; then
+    echo ">> net     : veth (bridge: $ETH_BRIDGE)"
+    echo ">>           host $ETH_IPV6_HOST  <->  session $ETH_IPV6_CONT"
+elif [[ $USE_NET_NS -eq 1 ]]; then
+    echo ">> net     : isolated (loopback only)"
+else
+    echo ">> net     : host"
+fi
 echo ""
 
 set +e
