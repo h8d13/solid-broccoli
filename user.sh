@@ -170,6 +170,9 @@ mkdir -p "$TMPTFS/etc/upper"      "$TMPTFS/etc/work"
 mkdir -p "$TMPTFS/varlib/upper"   "$TMPTFS/varlib/work"
 mkdir -p "$TMPTFS/varcache/upper" "$TMPTFS/varcache/work"
 
+# runit service dirs — sv-available holds definitions, sv is active (runsvdir watches it)
+mkdir -p "$TMPTFS/sv" "$TMPTFS/sv-available"
+
 mount -t overlay overlay \
     -o lowerdir=/etc/skel,upperdir="$TMPTFS/upper",workdir="$TMPTFS/work" \
     "$TMPHOME"
@@ -367,6 +370,14 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
         echo "error: --wayland requires xorg-xwayland on the host: sudo pacman -S xorg-xwayland" >&2
         exit 1
     fi
+
+    # sway service definition (available but not auto-activated)
+    mkdir -p "$TMPTFS/sv-available/sway"
+    cat > "$TMPTFS/sv-available/sway/run" << 'EOF'
+#!/bin/sh
+exec sway
+EOF
+    chmod +x "$TMPTFS/sv-available/sway/run"
 fi
 
 # ---------- broker ----------
@@ -475,6 +486,8 @@ SESSION_ENV=(
     XDG_DATA_DIRS="$TMPTFS/usr/upper/share:/usr/local/share:/usr/share"
     XKB_CONFIG_ROOT="$TMPTFS/usr/upper/share/xkeyboard-config-2"
     LIBINPUT_QUIRKS_DIR="/usr/share/libinput"
+    SVDIR="$TMPTFS/sv"
+    SVDIR_AVAILABLE="$TMPTFS/sv-available"
 )
 
 if [[ $USE_WAYLAND -eq 1 ]]; then
@@ -503,6 +516,15 @@ INNER+=(env -i "${SESSION_ENV[@]}")
 
 if [[ $# -gt 0 ]]; then
     INNER+=("$@")
+elif command -v runsvdir &>/dev/null; then
+    # write a tiny init: supervised services in background, interactive shell in foreground
+    cat > "$TMPTFS/init.sh" << EOF
+#!/bin/bash
+runsvdir "$TMPTFS/sv" &
+exec /bin/bash --login
+EOF
+    chmod +x "$TMPTFS/init.sh"
+    INNER+=("$TMPTFS/init.sh")
 else
     INNER+=(/bin/bash --login)
 fi
