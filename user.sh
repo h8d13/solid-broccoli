@@ -251,34 +251,47 @@ if [[ ${#BIND_MOUNTS[@]} -gt 0 ]]; then
     done
 fi
 
-# ---------- nested Wayland (--wayland) ----------
+# ---------- Wayland (--wayland) ----------
 if [[ $USE_WAYLAND -eq 1 ]]; then
-    REAL_UID=$(id -u "$REAL_USER")
-    HOST_XDG="/run/user/$REAL_UID"
-
-    # find the host Wayland socket
-    for _name in wayland-0 wayland-1 wayland-2; do
-        [[ -S "$HOST_XDG/$_name" ]] && WAYLAND_SOCK="$_name" && break
-    done
-    [[ -z "$WAYLAND_SOCK" ]] && { echo "error: no Wayland socket found in $HOST_XDG" >&2; exit 1; }
-
-    # session XDG_RUNTIME_DIR inside home
+    # session XDG_RUNTIME_DIR inside home — always created
     SESSION_XDG="$TMPHOME/.run"
     mkdir -p "$SESSION_XDG"
     chmod 700 "$SESSION_XDG"
     chown "${TMPUSER}:${TMPUSER}" "$SESSION_XDG"
 
-    # bind-mount the host Wayland socket in and open permissions so tmpuser can connect
-    # (compositor checks SO_PEERCRED uid — we need the socket world-accessible)
-    touch "$SESSION_XDG/$WAYLAND_SOCK"
-    mount --bind "$HOST_XDG/$WAYLAND_SOCK" "$SESSION_XDG/$WAYLAND_SOCK"
-    chmod 777 "$HOST_XDG/$WAYLAND_SOCK"
+    # try to find a host Wayland socket to forward (nested mode)
+    REAL_UID=$(id -u "$REAL_USER")
+    if [[ "$REAL_UID" -eq 0 ]]; then
+        for _dir in /run/user/*/; do
+            _uid="${_dir%/}"; _uid="${_uid##*/}"
+            [[ "$_uid" -eq 0 ]] && continue
+            for _name in wayland-0 wayland-1 wayland-2; do
+                [[ -S "${_dir}${_name}" ]] && HOST_XDG="${_dir%/}" && WAYLAND_SOCK="$_name" && break 2
+            done
+        done
+    else
+        HOST_XDG="/run/user/$REAL_UID"
+        for _name in wayland-0 wayland-1 wayland-2; do
+            [[ -S "$HOST_XDG/$_name" ]] && WAYLAND_SOCK="$_name" && break
+        done
+    fi
 
-    # add tmpuser to the render group for GPU acceleration (render node, no KMS needed)
+    if [[ -n "$WAYLAND_SOCK" ]]; then
+        # nested: forward host socket into session
+        touch "$SESSION_XDG/$WAYLAND_SOCK"
+        mount --bind "$HOST_XDG/$WAYLAND_SOCK" "$SESSION_XDG/$WAYLAND_SOCK"
+        chmod 777 "$HOST_XDG/$WAYLAND_SOCK"
+        echo ">> wayland : nested ($WAYLAND_SOCK from $HOST_XDG)"
+    else
+        # standalone: sway will create its own socket in XDG_RUNTIME_DIR
+        echo ">> wayland : standalone (no host socket found)"
+    fi
+
+    # add tmpuser to video + render groups for DRM/KMS access
+    VIDEO_GROUP=$(stat -c %G /dev/dri/card0 2>/dev/null || true)
     RENDER_GROUP=$(stat -c %G /dev/dri/renderD128 2>/dev/null || true)
+    [[ -n "$VIDEO_GROUP" ]]  && usermod -aG "$VIDEO_GROUP"  "$TMPUSER" 2>/dev/null || true
     [[ -n "$RENDER_GROUP" ]] && usermod -aG "$RENDER_GROUP" "$TMPUSER" 2>/dev/null || true
-
-    echo ">> wayland : $WAYLAND_SOCK (host $HOST_XDG)"
 fi
 
 # ---------- broker ----------
@@ -385,12 +398,17 @@ SESSION_ENV=(
 
 if [[ $USE_WAYLAND -eq 1 ]]; then
     SESSION_ENV+=(
-        WAYLAND_DISPLAY="$WAYLAND_SOCK"
         XDG_RUNTIME_DIR="$TMPHOME/.run"
-        WLR_BACKENDS=wayland
-        WLR_NO_HARDWARE_CURSORS=1
         XDG_SESSION_TYPE=wayland
     )
+    if [[ -n "$WAYLAND_SOCK" ]]; then
+        # nested: tell wlroots to use the forwarded socket
+        SESSION_ENV+=(
+            WAYLAND_DISPLAY="$WAYLAND_SOCK"
+            WLR_BACKENDS=wayland
+            WLR_NO_HARDWARE_CURSORS=1
+        )
+    fi
 fi
 
 INNER+=(env -i "${SESSION_ENV[@]}")
