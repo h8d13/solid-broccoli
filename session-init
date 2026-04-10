@@ -6,7 +6,6 @@
 # 3. Execs bash --login — when it exits the PID namespace dies, killing everything
 
 # ---------- persistent shell history ----------
-touch "$HOME/.imut/history"
 ln -sf "$HOME/.imut/history" "$HOME/.bash_history"
 
 # ---------- persistent dotfiles ----------
