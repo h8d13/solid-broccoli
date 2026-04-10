@@ -30,7 +30,9 @@ ETH_BRIDGE=""
 ETH_NETNS=""
 ETH_VETH_HOST=""
 ETH_HOST_IF=""
+ETH_HOST_IF4=""
 ETH_PREFIX=""
+ETH_IPV4_NET=""
 
 # ---------- parse options ----------
 while [[ $# -gt 0 ]]; do
@@ -71,8 +73,11 @@ cleanup() {
         done
     fi
     userdel "$TMPUSER" 2>/dev/null || true
+    if [[ -n "$ETH_HOST_IF4" && -n "$ETH_IPV4_NET" ]]; then
+        iptables  -t nat -D POSTROUTING -s "$ETH_IPV4_NET" -o "$ETH_HOST_IF4" -j MASQUERADE 2>/dev/null || true
+    fi
     if [[ -n "$ETH_HOST_IF" && -n "$ETH_PREFIX" ]]; then
-        ip6tables -t nat -D POSTROUTING -s "$ETH_PREFIX" -o "$ETH_HOST_IF" -j MASQUERADE 2>/dev/null || true
+        ip6tables -t nat -D POSTROUTING -s "$ETH_PREFIX"   -o "$ETH_HOST_IF"  -j MASQUERADE 2>/dev/null || true
     fi
     if [[ -n "$ETH_BRIDGE" ]]; then
         ip link set "$ETH_BRIDGE" down 2>/dev/null || true
@@ -125,36 +130,57 @@ if [[ $USE_ETH -eq 1 ]]; then
     ETH_VETH_HOST="veth-h-$SANDBOX_ID"
     ETH_BRIDGE="br-$SANDBOX_ID"
 
-    # random ULA prefix: fdXX:XXXX:XXXX::/64
+    # random addresses from R (6 random bytes)
     R=$(openssl rand -hex 6)
+
+    # ULA IPv6 prefix: fdXX:XXXX:XXXX::/64
     ETH_PREFIX="fd${R:0:2}:${R:2:4}:${R:6:4}::/64"
     ETH_IPV6_HOST="fd${R:0:2}:${R:2:4}:${R:6:4}::1"
     ETH_IPV6_CONT="fd${R:0:2}:${R:2:4}:${R:6:4}::2"
+
+    # random RFC1918 IPv4 subnet: 10.A.B.0/24
+    IPV4_A=$(( 0x${R:0:2} % 223 + 1 ))
+    IPV4_B=$(( 0x${R:2:2} ))
+    ETH_IPV4_NET="10.${IPV4_A}.${IPV4_B}.0/24"
+    ETH_IPV4_HOST="10.${IPV4_A}.${IPV4_B}.1"
+    ETH_IPV4_CONT="10.${IPV4_A}.${IPV4_B}.2"
 
     ip netns add "$ETH_NETNS"
     # create veth pair — container end lands directly in the netns
     ip link add "$ETH_VETH_HOST" type veth peer name eth0 netns "$ETH_NETNS"
 
-    # host side: attach to bridge, bring up
+    # host side: attach to bridge, assign both IPv4 and IPv6, bring up
     ip link add "$ETH_BRIDGE" type bridge
     ip link set "$ETH_VETH_HOST" master "$ETH_BRIDGE"
+    ip    addr add "${ETH_IPV4_HOST}/24" dev "$ETH_BRIDGE"
     ip -6 addr add "${ETH_IPV6_HOST}/64" dev "$ETH_BRIDGE"
     ip link set "$ETH_VETH_HOST" up
     ip link set "$ETH_BRIDGE" up
 
-    # container side: configure inside the netns
+    # container side: IPv4 + IPv6 + default routes
     ip netns exec "$ETH_NETNS" ip link set lo up
     ip netns exec "$ETH_NETNS" ip link set eth0 up
+    ip netns exec "$ETH_NETNS" ip    addr add "${ETH_IPV4_CONT}/24" dev eth0
     ip netns exec "$ETH_NETNS" ip -6 addr add "${ETH_IPV6_CONT}/64" dev eth0
+    ip netns exec "$ETH_NETNS" ip    route add default via "$ETH_IPV4_HOST" dev eth0
     ip netns exec "$ETH_NETNS" ip -6 route add default via "$ETH_IPV6_HOST" dev eth0
 
-    # NAT66: masquerade the sandbox prefix through the host's default IPv6 interface
-    ETH_HOST_IF=$(ip -6 route show default | awk 'NR==1{print $5}')
-    if [[ -z "$ETH_HOST_IF" ]]; then
-        echo "warning: no default IPv6 route on host — outbound IPv6 will not work" >&2
+    # IPv4 NAT
+    ETH_HOST_IF4=$(ip route show default | awk 'NR==1{print $5}')
+    if [[ -n "$ETH_HOST_IF4" ]]; then
+        iptables -t nat -A POSTROUTING -s "$ETH_IPV4_NET" -o "$ETH_HOST_IF4" -j MASQUERADE
     else
+        echo "warning: no default IPv4 route on host — outbound IPv4 will not work" >&2
+    fi
+
+    # IPv6 NAT66 — preserve host RA so enabling forwarding doesn't drop the host's own IPv6 route
+    ETH_HOST_IF=$(ip -6 route show default | awk 'NR==1{print $5}')
+    if [[ -n "$ETH_HOST_IF" ]]; then
         sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null
+        sysctl -w "net.ipv6.conf.${ETH_HOST_IF}.accept_ra=2" >/dev/null
         ip6tables -t nat -A POSTROUTING -s "$ETH_PREFIX" -o "$ETH_HOST_IF" -j MASQUERADE
+    else
+        echo "warning: no default IPv6 route on host — outbound IPv6 will not work" >&2
     fi
 fi
 
@@ -272,7 +298,8 @@ echo ">> home    : $TMPHOME (overlay, RAM-backed)"
 echo ">> mem     : ${MEM_LIMIT} virt  |  files: ${MAX_FILES}"
 if [[ $USE_ETH -eq 1 ]]; then
     echo ">> net     : veth (bridge: $ETH_BRIDGE)"
-    echo ">>           host $ETH_IPV6_HOST  <->  session $ETH_IPV6_CONT"
+    echo ">>   ipv4  : $ETH_IPV4_HOST  <->  $ETH_IPV4_CONT"
+    echo ">>   ipv6  : $ETH_IPV6_HOST  <->  $ETH_IPV6_CONT"
 elif [[ $USE_NET_NS -eq 1 ]]; then
     echo ">> net     : isolated (loopback only)"
 else
