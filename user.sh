@@ -33,6 +33,9 @@ ETH_HOST_IF=""
 ETH_HOST_IF4=""
 ETH_PREFIX=""
 ETH_IPV4_NET=""
+SAVED_IP_FORWARD=""
+SAVED_IP6_FORWARD=""
+SAVED_ACCEPT_RA=""
 
 # ---------- parse options ----------
 while [[ $# -gt 0 ]]; do
@@ -77,11 +80,14 @@ cleanup() {
         iptables  -t nat -D POSTROUTING -s "$ETH_IPV4_NET" -o "$ETH_HOST_IF4" -j MASQUERADE 2>/dev/null || true
         iptables  -D FORWARD -i "$ETH_BRIDGE"    -o "$ETH_HOST_IF4" -j ACCEPT 2>/dev/null || true
         iptables  -D FORWARD -i "$ETH_HOST_IF4"  -o "$ETH_BRIDGE"   -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+        [[ -n "$SAVED_IP_FORWARD" ]]  && echo "$SAVED_IP_FORWARD"  > /proc/sys/net/ipv4/ip_forward
     fi
     if [[ -n "$ETH_HOST_IF" && -n "$ETH_PREFIX" ]]; then
         ip6tables -t nat -D POSTROUTING -s "$ETH_PREFIX"   -o "$ETH_HOST_IF"  -j MASQUERADE 2>/dev/null || true
         ip6tables -D FORWARD -i "$ETH_BRIDGE"   -o "$ETH_HOST_IF"  -j ACCEPT 2>/dev/null || true
         ip6tables -D FORWARD -i "$ETH_HOST_IF"  -o "$ETH_BRIDGE"   -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+        [[ -n "$SAVED_IP6_FORWARD" ]] && echo "$SAVED_IP6_FORWARD" > /proc/sys/net/ipv6/conf/all/forwarding
+        [[ -n "$SAVED_ACCEPT_RA" ]]   && echo "$SAVED_ACCEPT_RA"   > "/proc/sys/net/ipv6/conf/${ETH_HOST_IF}/accept_ra"
     fi
     if [[ -n "$ETH_BRIDGE" ]]; then
         ip link set "$ETH_BRIDGE" down 2>/dev/null || true
@@ -172,6 +178,7 @@ if [[ $USE_ETH -eq 1 ]]; then
     # IPv4 NAT
     ETH_HOST_IF4=$(ip route show default | awk 'NR==1{print $5}')
     if [[ -n "$ETH_HOST_IF4" ]]; then
+        SAVED_IP_FORWARD=$(cat /proc/sys/net/ipv4/ip_forward)
         echo 1 > /proc/sys/net/ipv4/ip_forward
         iptables -t nat -A POSTROUTING -s "$ETH_IPV4_NET" -o "$ETH_HOST_IF4" -j MASQUERADE
         iptables -A FORWARD -i "$ETH_BRIDGE" -o "$ETH_HOST_IF4" -j ACCEPT
@@ -180,13 +187,15 @@ if [[ $USE_ETH -eq 1 ]]; then
         echo "warning: no default IPv4 route on host — outbound IPv4 will not work" >&2
     fi
 
-    # IPv6 NAT66 — preserve host RA so enabling forwarding doesn't drop the host's own IPv6 route
+    # IPv6 NAT66 — preserve host RA so enabling forwarding doesn't drop the host's own IPv6 default route
     ETH_HOST_IF=$(ip -6 route show default | awk 'NR==1{print $5}')
     if [[ -n "$ETH_HOST_IF" ]]; then
+        SAVED_IP6_FORWARD=$(cat /proc/sys/net/ipv6/conf/all/forwarding)
         echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
-        # accept_ra=2: keep accepting RAs even with forwarding on (prevents losing host's IPv6 default route)
-        [[ -f "/proc/sys/net/ipv6/conf/${ETH_HOST_IF}/accept_ra" ]] && \
+        if [[ -f "/proc/sys/net/ipv6/conf/${ETH_HOST_IF}/accept_ra" ]]; then
+            SAVED_ACCEPT_RA=$(cat "/proc/sys/net/ipv6/conf/${ETH_HOST_IF}/accept_ra")
             echo 2 > "/proc/sys/net/ipv6/conf/${ETH_HOST_IF}/accept_ra"
+        fi
         ip6tables -t nat -A POSTROUTING -s "$ETH_PREFIX" -o "$ETH_HOST_IF" -j MASQUERADE
         ip6tables -A FORWARD -i "$ETH_BRIDGE" -o "$ETH_HOST_IF" -j ACCEPT
         ip6tables -A FORWARD -i "$ETH_HOST_IF" -o "$ETH_BRIDGE" -m state --state RELATED,ESTABLISHED -j ACCEPT
