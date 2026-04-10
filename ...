@@ -1,5 +1,54 @@
 # How this works
 
-=> User defines rules to get into the temp envir.
-=> Rules are applied to the container and is interactive.
-=> Inside a simple service wrapper is available.
+## Overview
+A Linux sandbox that creates a throwaway user session on demand.
+Every write is RAM-backed and gone on exit — host filesystem is never touched.
+
+## Launch
+`sudo ./user.sh [options]` sets up the session:
+- Creates a temporary user (`tmpuser_XXXX`) with a random name
+- Mounts a tmpfs-backed overlay on a fresh home dir (`/var/tmp/home_XXXX`)
+- Overlays `/usr`, `/etc`, `/var/lib`, `/var/cache` in RAM (shared with broker)
+- Drops into the session via `unshare` (pid/mount/uts/cgroup namespaces)
+- Cleans everything up on exit (user, mounts, dirs)
+
+## Inside the session
+Starts via `session-init`, which launches any defined services then execs `bash --login`.
+When bash exits the PID namespace dies, killing all background services instantly.
+
+### Networking
+- Default: host network (no isolation)
+- `--no-net`: loopback only
+- `--eth`: veth pair + bridge, random ULA IPv6 + RFC1918 IPv4, NAT to host
+
+### Wayland
+- `--wayland`: standalone compositor via seatd, or nested if a host socket is found
+- D-Bus session bus started on host, socket forwarded into the session
+- Run `sv setup sway && sv start sway` inside the session to start a compositor
+
+### Root broker
+- `--allow <cmd>`: whitelists a command the session can run as root
+- `run-as-root <cmd>` inside the session sends the command to `broker.py` over a Unix socket
+- Broker runs the command inside a fresh mount namespace with the same overlays
+- Packages installed this way (e.g. pacman) are visible in the session immediately
+
+## Services (sv)
+`sv` manages background processes inside the session:
+
+```
+sv setup <name> [command]   create a service (defaults to: exec <name>)
+sv start  <name>            start it in the background
+sv stop   <name>            stop it
+sv status <name>            check if running
+```
+
+Services live in `$SVDIR/<name>/run`. A `down` file prevents auto-start.
+Any service started at session-init time is killed automatically when the session ends.
+
+## Files
+- `user.sh`       — entrypoint, run as root
+- `broker.py`     — root-side command broker
+- `run-as-root`   — session-side broker client (installed into .bin at launch)
+- `session-init`  — session entrypoint, starts services then execs bash
+- `sv`            — service control script (installed into .bin at launch)
+- `seccomp-wrap.py` — installs seccomp denylist, execs into session
