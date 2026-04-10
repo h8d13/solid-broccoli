@@ -302,10 +302,6 @@ mount -t tmpfs tmpfs /tmp
 mount -t overlay overlay -o lowerdir=/usr,upperdir=$TMPTFS/usr/upper,workdir=$TMPTFS/usr/work,index=off /usr
 mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir=$TMPTFS/pacman/upper,workdir=$TMPTFS/pacman/work,index=off /var/lib/pacman
 mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir=$TMPTFS/cache/upper,workdir=$TMPTFS/cache/work,index=off /var/cache/pacman
-# mask hardware-identifying sysfs paths
-for _p in /sys/class/drm /sys/class/hwmon /sys/devices/virtual/dmi /sys/firmware; do
-    [ -d \"\$_p\" ] && mount -t tmpfs tmpfs \"\$_p\"
-done
 exec \"\$@\""
 
 CMD=(
