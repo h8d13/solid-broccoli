@@ -1,8 +1,9 @@
 # How this works
 
 ## Overview
+
 A Linux sandbox that creates a throwaway user session on demand.
-Every write is RAM-backed and gone on exit — host filesystem is never touched.
+Every write is RAM-backed and gone on exit host filesystem is never touched.
 
 ## Launch
 `sudo ./user.sh [options]` sets up the session:
@@ -45,10 +46,8 @@ sv status <name>            check if running
 Services live in `$SVDIR/<name>/run`. A `down` file prevents auto-start.
 Any service started at session-init time is killed automatically when the session ends.
 
-## Files
-- `user.sh`       — entrypoint, run as root
-- `broker.py`     — root-side command broker
-- `run-as-root`   — session-side broker client (installed into .bin at launch)
-- `session-init`  — session entrypoint, starts services then execs bash
-- `sv`            — service control script (installed into .bin at launch)
-- `seccomp-wrap.py` — installs seccomp denylist, execs into session
+## Persistent store (~/.imut)
+
+- `~/.imut/` is bind-mounted into every session — survives exits, owned by the real user
+- `~/.imut/home/` — anything here gets **symlinked** into the session `$HOME` at launch (dotfiles, configs, etc.)
+- `~/.imut/history` — session shell history is symlinked to `~/.bash_history` automatically
