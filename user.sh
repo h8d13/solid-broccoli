@@ -62,7 +62,7 @@ USE_WAYLAND=0
 WAYLAND_SOCK=""
 SEATD_SOCK=""
 SEATD_PID=""
-DBUS_USER_SERVICE=""
+DBUS_PID=""
 ETH_BRIDGE=""
 ETH_NETNS=""
 ETH_VETH_HOST=""
@@ -110,7 +110,7 @@ cleanup() {
     echo ">> session ended — user, home, and all writes cleaned up"
     [[ -n "$BROKER_PID" ]] && kill "$BROKER_PID" 2>/dev/null || true
     [[ -n "$SEATD_PID" ]]  && kill "$SEATD_PID"  2>/dev/null || true
-    [[ -n "$DBUS_USER_SERVICE" ]] && systemctl stop "$DBUS_USER_SERVICE" 2>/dev/null || true
+    [[ -n "$DBUS_PID" ]]   && kill "$DBUS_PID"   2>/dev/null || true
     if [[ ${#BIND_MOUNTS[@]} -gt 0 ]]; then
         for bm in "${BIND_MOUNTS[@]}"; do
             dst="${bm#*:}"
@@ -292,6 +292,18 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     chown "${TMPUID}:${TMPGID}" "$SESSION_XDG"
     chmod 700 "$SESSION_XDG"
 
+    # D-Bus session bus — socket in /run/user/$TMPUID (visible inside namespace,
+    # /run is not remounted). Run as session user via setpriv so ownership matches.
+    DBUS_SOCK="/run/user/$TMPUID/bus"
+    XDG_RUNTIME_DIR="/run/user/$TMPUID" \
+    setpriv --reuid="$TMPUID" --regid="$TMPGID" --init-groups -- \
+        dbus-daemon --session --nopidfile --address="unix:path=$DBUS_SOCK" &
+    DBUS_PID=$!
+    for _i in {1..20}; do [[ -S "$DBUS_SOCK" ]] && break; sleep 0.1; done
+    [[ -S "$DBUS_SOCK" ]] \
+        && echo ">> dbus    : session bus (pid: $DBUS_PID)" \
+        || echo "warning: dbus-daemon failed to start" >&2
+
     # try to find a host Wayland socket to forward (nested mode)
     REAL_UID=$(id -u "$REAL_USER")
     if [[ "$REAL_UID" -eq 0 ]]; then
@@ -335,16 +347,12 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     [[ -n "$VIDEO_GROUP" ]]  && usermod -aG "$VIDEO_GROUP"  "$TMPUSER" 2>/dev/null || true
     [[ -n "$RENDER_GROUP" ]] && usermod -aG "$RENDER_GROUP" "$TMPUSER" 2>/dev/null || true
 
-    # start systemd user instance for tmpuser — provides the user D-Bus bus
-    # at /run/user/$TMPUID/bus exactly as a real login session would
-    DBUS_USER_SERVICE="user@${TMPUID}.service"
-    systemctl start "$DBUS_USER_SERVICE" || true
-    for _i in {1..20}; do [[ -S "/run/user/$TMPUID/bus" ]] && break; sleep 0.1; done
-    if [[ -S "/run/user/$TMPUID/bus" ]]; then
-        echo ">> dbus    : systemd user bus ready (uid: $TMPUID)"
-    else
-        echo "warning: systemd user instance failed to start" >&2
-    fi
+
+    # mask 50-systemd-user.conf inside the session — it tries to import env vars
+    # into the systemd user session which doesn't exist in the jail; causes noise
+    mkdir -p "$TMPTFS/etc/upper/sway/config.d"
+    # overlayfs whiteout: a char device 0:0 hides the lower dir file
+    mknod "$TMPTFS/etc/upper/sway/config.d/50-systemd-user.conf" c 0 0 2>/dev/null || true
 
     # Xwayland must be on the host — the /usr overlay lower dir surfaces it at
     # /usr/bin/Xwayland inside the session automatically; no staging needed
