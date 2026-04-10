@@ -36,8 +36,8 @@ try:
     while chunk := s.recv(4096):
         raw += chunk
 except KeyboardInterrupt:
-    print("receivded keyboard interrupt.")
-    SystemExit(0)
+    s.close()
+    SystemExit(130)
 
 try:
     resp = json.loads(raw.decode())
