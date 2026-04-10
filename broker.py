@@ -46,10 +46,7 @@ mount -t overlay overlay -o lowerdir=/usr,upperdir={tmptfs}/usr/upper,workdir={t
 mount -t overlay overlay -o lowerdir=/etc,upperdir={tmptfs}/etc/upper,workdir={tmptfs}/etc/work,index=off /etc
 mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir={tmptfs}/pacman/upper,workdir={tmptfs}/pacman/work,index=off /var/lib/pacman
 mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir={tmptfs}/cache/upper,workdir={tmptfs}/cache/work,index=off /var/cache/pacman
-"$@"
-_RET=$?
-ldconfig 2>/dev/null || true
-exit $_RET
+exec "$@"
 """
 
 if os.path.exists(sock_path):

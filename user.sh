@@ -380,6 +380,7 @@ SESSION_ENV=(
     TERM="${TERM:-xterm}"
     LANG="${LANG:-C.UTF-8}"
     PATH="${BROKER_PID:+$TMPHOME/.bin:}$TMPTFS/usr/upper/local/bin:$TMPTFS/usr/upper/bin:/usr/local/bin:/usr/bin:/bin"
+    LD_LIBRARY_PATH="$TMPTFS/usr/upper/lib"
 )
 
 if [[ $USE_WAYLAND -eq 1 ]]; then
@@ -432,9 +433,6 @@ for _f in /proc/cpuinfo /proc/version /proc/swaps /proc/diskstats /proc/partitio
     [ -e \"\$_f\" ] && mount --bind /dev/null \"\$_f\"
 done
 mount --bind $TMPTFS/meminfo /proc/meminfo
-
-# rebuild ld.so.cache with the session's view of /usr/lib (overlays already mounted)
-ldconfig 2>/dev/null || true
 
 exec \"\$@\""
 
