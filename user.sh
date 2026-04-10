@@ -446,7 +446,7 @@ SESSION_ENV=(
     LD_LIBRARY_PATH="$TMPTFS/usr/upper/lib"
     XDG_DATA_DIRS="$TMPTFS/usr/upper/share:/usr/local/share:/usr/share"
     XKB_CONFIG_ROOT="$TMPTFS/usr/upper/share/xkeyboard-config-2"
-    LIBINPUT_QUIRKS_DIR="$TMPTFS/usr/upper/share/libinput"
+    LIBINPUT_QUIRKS_DIR="/usr/share/libinput"
 )
 
 if [[ $USE_WAYLAND -eq 1 ]]; then
