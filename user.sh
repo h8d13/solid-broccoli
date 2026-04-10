@@ -6,6 +6,7 @@
 # Options:
 #   --mem   <size>       virtual memory limit e.g. 512M (default: 512M)
 #   --files <n>          max open file descriptors (default: 1024)
+#   --procs <n>          max processes/threads (default: 512)
 #   --bind  <src>:<dst>  bind-mount src read-only into session home at dst
 #   --no-net             isolated loopback-only network namespace
 #   --eth                veth pair + bridge with a random ULA IPv6 address
@@ -58,6 +59,7 @@ fi
 # ---------- defaults ----------
 MEM_LIMIT="512M"
 MAX_FILES=1024
+MAX_PROCS=512
 BIND_MOUNTS=()
 USE_NET_NS=0
 USE_ETH=0
@@ -86,6 +88,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --mem)    MEM_LIMIT="$2";      shift 2 ;;
         --files)  MAX_FILES="$2";      shift 2 ;;
+        --procs)  MAX_PROCS="$2";      shift 2 ;;
         --bind)   BIND_MOUNTS+=("$2"); shift 2 ;;
         --no-net) USE_NET_NS=1;              shift   ;;
         --eth)    USE_ETH=1;                 shift   ;;
@@ -419,7 +422,7 @@ case "$MEM_LIMIT" in
 esac
 
 # ---------- namespace wrapper ----------
-UNSHARE=(unshare --fork --pid --mount-proc --mount --uts --cgroup)
+UNSHARE=(unshare --fork --pid --mount-proc --mount --uts --cgroup --ipc)
 [[ $USE_NET_NS -eq 1 ]] && UNSHARE+=(--net)
 
 # ---------- capability flags ----------
@@ -440,6 +443,8 @@ INNER=(
     prlimit
         "${PRLIMIT_AS[@]+"${PRLIMIT_AS[@]}"}"
         "--nofile=$MAX_FILES"
+        "--nproc=$MAX_PROCS"
+        --core=0
         --
     setpriv
         --reuid="$TMPUID"
@@ -561,7 +566,7 @@ fi
 echo ">> session : $TMPUSER"
 echo ">> hostname: $TMPHOSTNAME"
 echo ">> home    : $TMPHOME (overlay, RAM-backed)"
-echo ">> mem     : ${MEM_LIMIT} virt  |  files: ${MAX_FILES}"
+echo ">> mem     : ${MEM_LIMIT} virt  |  files: ${MAX_FILES}  |  procs: ${MAX_PROCS}"
 if [[ $USE_ETH -eq 1 ]]; then
     echo ">> net     : veth (bridge: $ETH_BRIDGE)"
     echo ">>   ipv4  : $ETH_IPV4_HOST  <->  $ETH_IPV4_CONT"
@@ -577,6 +582,16 @@ fi
 [[ ${#AMBIENT_CAPS[@]} -gt 0 ]] && echo ">> caps    : ${AMBIENT_CAPS[*]}"
 [[ -f "$SECCOMP_SRC" ]]         && echo ">> seccomp : denylist active"
 echo ""
+
+# prefer killing the session over host processes under memory pressure
+echo 200 > /proc/self/oom_score_adj
+
+# close any fds above stderr that user.sh may have opened (wayland socket
+# bind-mounts, broker pipe ends, etc.) so they don't leak into the session
+for _fd in /proc/self/fd/*; do
+    _n="${_fd##*/}"
+    [[ $_n -gt 2 ]] && exec {_n}<&- 2>/dev/null || true
+done
 
 set +e
 "${UNSHARE[@]}" "${CMD[@]}"
