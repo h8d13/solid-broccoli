@@ -278,10 +278,12 @@ INNER=(
         --bounding-set=-all
         --no-new-privs
         --
-    env
+    env -i
         HOME="$TMPHOME"
         USER="$TMPUSER"
         LOGNAME="$TMPUSER"
+        TERM="${TERM:-xterm}"
+        LANG="${LANG:-C.UTF-8}"
         PATH="${BROKER_PID:+$TMPHOME/.bin:}$TMPTFS/usr/upper/local/bin:$TMPTFS/usr/upper/bin:/usr/local/bin:/usr/bin:/bin"
 )
 
@@ -300,6 +302,10 @@ mount -t tmpfs tmpfs /tmp
 mount -t overlay overlay -o lowerdir=/usr,upperdir=$TMPTFS/usr/upper,workdir=$TMPTFS/usr/work,index=off /usr
 mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir=$TMPTFS/pacman/upper,workdir=$TMPTFS/pacman/work,index=off /var/lib/pacman
 mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir=$TMPTFS/cache/upper,workdir=$TMPTFS/cache/work,index=off /var/cache/pacman
+# mask hardware-identifying sysfs paths
+for _p in /sys/class/drm /sys/class/hwmon /sys/devices/virtual/dmi /sys/firmware; do
+    [ -d \"\$_p\" ] && mount -t tmpfs tmpfs \"\$_p\"
+done
 exec \"\$@\""
 
 CMD=(
