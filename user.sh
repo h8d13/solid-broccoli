@@ -46,6 +46,7 @@ done
 
 # ---------- temp user + dirs ----------
 TMPUSER="tmpuser_$(openssl rand -hex 4)"
+SANDBOX_ID="$(openssl rand -hex 4)"
 TMPHOME="$(mktemp -d /var/tmp/home_XXXXXX)"   # overlay merged mount point
 TMPTFS="$(mktemp -d /var/tmp/tfs_XXXXXX)"     # tmpfs backing upper/work (RAM only)
 BROKER_SOCK="$TMPHOME/.broker.sock"
@@ -107,7 +108,7 @@ chmod 700 "$TMPHOME"
 
 TMPUID=$(id -u "$TMPUSER")
 TMPGID=$(id -g "$TMPUSER")
-TMPHOSTNAME="sandbox-${TMPUSER#tmpuser_}"
+TMPHOSTNAME="sandbox-$SANDBOX_ID"
 
 if [[ $USE_NET_NS -eq 1 && $USE_ETH -eq 1 ]]; then
     echo "error: --no-net and --eth are mutually exclusive" >&2; exit 1
@@ -115,10 +116,9 @@ fi
 
 # ---------- veth + bridge (--eth) ----------
 if [[ $USE_ETH -eq 1 ]]; then
-    HEX="${TMPUSER#tmpuser_}"
-    ETH_NETNS="ns-$HEX"
-    ETH_VETH_HOST="veth-h-$HEX"
-    ETH_BRIDGE="br-$HEX"
+    ETH_NETNS="ns-$SANDBOX_ID"
+    ETH_VETH_HOST="veth-h-$SANDBOX_ID"
+    ETH_BRIDGE="br-$SANDBOX_ID"
 
     # random ULA prefix: fdXX:XXXX:XXXX::/64
     R=$(openssl rand -hex 6)
