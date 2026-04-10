@@ -18,6 +18,8 @@ if [[ -d "$HOME/.imut/home" ]]; then
     done
 fi
 
+cd "$HOME"
+
 # ---------- services ----------
 for _svc in "$SVDIR"/*/ "$SVDIR_TEMP"/*/; do
     [[ -d "$_svc" && -x "$_svc/run" && ! -f "$_svc/down" ]] || continue
@@ -25,5 +27,4 @@ for _svc in "$SVDIR"/*/ "$SVDIR_TEMP"/*/; do
     echo $! > "$_svc/pid"
 done
 
-cd "$HOME"
 exec /bin/bash --login
