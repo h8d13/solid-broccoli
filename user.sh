@@ -335,12 +335,12 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     [[ -n "$VIDEO_GROUP" ]]  && usermod -aG "$VIDEO_GROUP"  "$TMPUSER" 2>/dev/null || true
     [[ -n "$RENDER_GROUP" ]] && usermod -aG "$RENDER_GROUP" "$TMPUSER" 2>/dev/null || true
 
-    # D-Bus session daemon — started as the session user so socket ownership is correct
-    # socket lives in /run/user/$TMPUID which is shared with the session namespace
+    # D-Bus session daemon — run as the session user so the socket is owned correctly
+    # socket lives in /run/user/$TMPUID which is visible inside the session namespace
     DBUS_SOCK="/run/user/$TMPUID/bus"
-    DBUS_PID=$(runuser -u "$TMPUSER" -- \
-        dbus-daemon --session --fork --nopidfile \
-            --address="unix:path=$DBUS_SOCK" --print-pid 2>/dev/null || true)
+    DBUS_PID=$(setpriv --reuid="$TMPUID" --regid="$TMPGID" --init-groups -- \
+        dbus-daemon --session --fork --address="unix:path=$DBUS_SOCK" --print-pid 2>/dev/null \
+        || true)
     [[ -n "$DBUS_PID" ]] && echo ">> dbus    : session bus (pid: $DBUS_PID, sock: $DBUS_SOCK)" \
                          || echo "warning: dbus-daemon failed to start" >&2
 
