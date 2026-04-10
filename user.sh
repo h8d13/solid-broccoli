@@ -338,7 +338,7 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     # start systemd user instance for tmpuser — provides the user D-Bus bus
     # at /run/user/$TMPUID/bus exactly as a real login session would
     DBUS_USER_SERVICE="user@${TMPUID}.service"
-    systemctl start "$DBUS_USER_SERVICE" 2>/dev/null || true
+    systemctl start "$DBUS_USER_SERVICE" || true
     for _i in {1..20}; do [[ -S "/run/user/$TMPUID/bus" ]] && break; sleep 0.1; done
     if [[ -S "/run/user/$TMPUID/bus" ]]; then
         echo ">> dbus    : systemd user bus ready (uid: $TMPUID)"
