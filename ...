@@ -1,0 +1,5 @@
+# How this works
+
+=> User defines rules to get into the temp envir.
+=> Rules are applied to the container and is interactive.
+=> Inside a simple service wrapper is available.
