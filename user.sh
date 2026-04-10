@@ -192,6 +192,7 @@ TMPHOSTNAME="sandbox-$SANDBOX_ID"
 
 # service dirs — persistent survives sessions, temp is gone on exit
 mkdir -p "$IMUT_DIR/sv"
+chown "${TMPUID}:${TMPGID}" "$IMUT_DIR/sv"
 mkdir -p "$TMPTFS/sv"
 
 if [[ $USE_NET_NS -eq 1 && $USE_ETH -eq 1 ]]; then
