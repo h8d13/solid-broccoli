@@ -151,13 +151,6 @@ useradd \
 chown "${TMPUSER}:${TMPUSER}" "$TMPHOME"
 chmod 700 "$TMPHOME"
 
-# bash --login sources .bash_profile; cd to $HOME so interactive sessions
-# start in the sandbox home rather than inheriting the parent shell's cwd
-if [[ ! -f "$TMPHOME/.bash_profile" ]]; then
-    printf 'cd "$HOME"\n' > "$TMPHOME/.bash_profile"
-    chown "${TMPUSER}:${TMPUSER}" "$TMPHOME/.bash_profile"
-fi
-
 TMPUID=$(id -u "$TMPUSER")
 TMPGID=$(id -g "$TMPUSER")
 TMPHOSTNAME="sandbox-$SANDBOX_ID"
@@ -485,6 +478,7 @@ for _f in /proc/cpuinfo /proc/version /proc/swaps /proc/diskstats /proc/partitio
 done
 mount --bind $TMPTFS/meminfo /proc/meminfo
 
+cd $TMPHOME
 exec \"\$@\""
 
 CMD=(
