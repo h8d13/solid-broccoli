@@ -409,6 +409,7 @@ SESSION_ENV=(
     PATH="${BROKER_PID:+$TMPHOME/.bin:}$TMPTFS/usr/upper/local/bin:$TMPTFS/usr/upper/bin:/usr/local/bin:/usr/bin:/bin"
     LD_LIBRARY_PATH="$TMPTFS/usr/upper/lib"
     XDG_DATA_DIRS="$TMPTFS/usr/upper/share:/usr/local/share:/usr/share"
+    XKB_CONFIG_ROOT="$TMPTFS/usr/upper/share/xkeyboard-config-2"
 )
 
 if [[ $USE_WAYLAND -eq 1 ]]; then
