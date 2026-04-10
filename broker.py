@@ -46,7 +46,10 @@ mount -t overlay overlay -o lowerdir=/usr,upperdir={tmptfs}/usr/upper,workdir={t
 mount -t overlay overlay -o lowerdir=/etc,upperdir={tmptfs}/etc/upper,workdir={tmptfs}/etc/work,index=off /etc
 mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir={tmptfs}/pacman/upper,workdir={tmptfs}/pacman/work,index=off /var/lib/pacman
 mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir={tmptfs}/cache/upper,workdir={tmptfs}/cache/work,index=off /var/cache/pacman
-exec "$@"
+"$@"
+_RET=$?
+ldconfig 2>/dev/null || true
+exit $_RET
 """
 
 if os.path.exists(sock_path):
@@ -110,6 +113,7 @@ def handle(conn):
                 stdin=stdin_fd,
                 stdout=stdout_fd,
                 stderr=stderr_fd,
+                start_new_session=True,
             )
         except FileNotFoundError:
             conn.sendall(json.dumps({"error": f"command not found: {args[0]}"}).encode() + b"\n")
@@ -127,13 +131,19 @@ def handle(conn):
                 if r:
                     data = conn.recv(1)
                     if not data:
-                        proc.kill()
+                        try:
+                            os.killpg(proc.pid, signal.SIGKILL)
+                        except OSError:
+                            proc.kill()
                         proc.wait()
                         syslog.syslog(syslog.LOG_INFO,
                             f"KILLED  uid={uid} cmd={args} (client disconnected)")
                         return
         except OSError:
-            proc.kill()
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                proc.kill()
             proc.wait()
             return
 

@@ -433,6 +433,9 @@ for _f in /proc/cpuinfo /proc/version /proc/swaps /proc/diskstats /proc/partitio
 done
 mount --bind $TMPTFS/meminfo /proc/meminfo
 
+# rebuild ld.so.cache with the session's view of /usr/lib (overlays already mounted)
+ldconfig 2>/dev/null || true
+
 exec \"\$@\""
 
 CMD=(
