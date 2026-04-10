@@ -403,9 +403,12 @@ done
 
 # ---------- sandboxed command ----------
 # inner: apply resource limits, drop privileges, optionally install seccomp, then exec
+PRLIMIT_AS=()
+if [[ $USE_WAYLAND -eq 0 ]]; then PRLIMIT_AS=("--as=$MEM_BYTES"); fi
+
 INNER=(
     prlimit
-        $([[ $USE_WAYLAND -eq 0 ]] && echo "--as=$MEM_BYTES")
+        "${PRLIMIT_AS[@]+"${PRLIMIT_AS[@]}"}"
         "--nofile=$MAX_FILES"
         --
     setpriv
