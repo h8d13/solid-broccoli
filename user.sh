@@ -11,6 +11,7 @@
 #   --eth                veth pair + bridge with a random ULA IPv6 address
 #   --port  <h:c>        forward host port h → session port c (requires --eth, repeatable)
 #   --cap   <name>       raise an ambient capability in the session (repeatable)
+#   --wayland            nested Wayland session (passes host socket + GPU render node)
 #   --allow <cmd>        whitelist a command the session can run as root (repeatable)
 #   --                   end of options; everything after is the program + args
 
@@ -30,6 +31,8 @@ USE_ETH=0
 WHITELIST=()
 AMBIENT_CAPS=()
 PORT_MAPS=()
+USE_WAYLAND=0
+WAYLAND_SOCK=""
 ETH_BRIDGE=""
 ETH_NETNS=""
 ETH_VETH_HOST=""
@@ -51,6 +54,7 @@ while [[ $# -gt 0 ]]; do
         --eth)    USE_ETH=1;                 shift   ;;
         --port)   PORT_MAPS+=("$2");         shift 2 ;;
         --cap)    AMBIENT_CAPS+=("$2");      shift 2 ;;
+        --wayland) USE_WAYLAND=1;           shift   ;;
         --allow)  WHITELIST+=("$2");         shift 2 ;;
         --)       shift; break ;;
         *)        break ;;
@@ -105,6 +109,7 @@ cleanup() {
         ip link del "$ETH_BRIDGE"     2>/dev/null || true
     fi
     [[ -n "$ETH_NETNS" ]] && ip netns del "$ETH_NETNS" 2>/dev/null || true
+    [[ -n "$WAYLAND_SOCK" ]] && umount "$TMPHOME/.run/$WAYLAND_SOCK" 2>/dev/null || true
     umount "$TMPHOME/.imut" 2>/dev/null || true
     umount "$TMPHOME"  2>/dev/null || true
     umount "$TMPTFS"   2>/dev/null || true
@@ -242,6 +247,34 @@ if [[ ${#BIND_MOUNTS[@]} -gt 0 ]]; then
     done
 fi
 
+# ---------- nested Wayland (--wayland) ----------
+if [[ $USE_WAYLAND -eq 1 ]]; then
+    REAL_UID=$(id -u "$REAL_USER")
+    HOST_XDG="/run/user/$REAL_UID"
+
+    # find the host Wayland socket
+    for _name in wayland-0 wayland-1 wayland-2; do
+        [[ -S "$HOST_XDG/$_name" ]] && WAYLAND_SOCK="$_name" && break
+    done
+    [[ -z "$WAYLAND_SOCK" ]] && { echo "error: no Wayland socket found in $HOST_XDG" >&2; exit 1; }
+
+    # session XDG_RUNTIME_DIR inside home
+    SESSION_XDG="$TMPHOME/.run"
+    mkdir -p "$SESSION_XDG"
+    chmod 700 "$SESSION_XDG"
+    chown "${TMPUSER}:${TMPUSER}" "$SESSION_XDG"
+
+    # bind-mount the host Wayland socket in
+    touch "$SESSION_XDG/$WAYLAND_SOCK"
+    mount --bind "$HOST_XDG/$WAYLAND_SOCK" "$SESSION_XDG/$WAYLAND_SOCK"
+
+    # add tmpuser to the render group for GPU acceleration (render node, no KMS needed)
+    RENDER_GROUP=$(stat -c %G /dev/dri/renderD128 2>/dev/null || true)
+    [[ -n "$RENDER_GROUP" ]] && usermod -aG "$RENDER_GROUP" "$TMPUSER" 2>/dev/null || true
+
+    echo ">> wayland : $WAYLAND_SOCK (host $HOST_XDG)"
+fi
+
 # ---------- broker ----------
 if [[ ${#WHITELIST[@]} -gt 0 ]]; then
 
@@ -334,15 +367,26 @@ if [[ -f "$SECCOMP_SRC" ]]; then
     INNER+=(python3 "$TMPTFS/seccomp-wrap.py" --)
 fi
 
-INNER+=(
-    env -i
-        HOME="$TMPHOME"
-        USER="$TMPUSER"
-        LOGNAME="$TMPUSER"
-        TERM="${TERM:-xterm}"
-        LANG="${LANG:-C.UTF-8}"
-        PATH="${BROKER_PID:+$TMPHOME/.bin:}$TMPTFS/usr/upper/local/bin:$TMPTFS/usr/upper/bin:/usr/local/bin:/usr/bin:/bin"
+SESSION_ENV=(
+    HOME="$TMPHOME"
+    USER="$TMPUSER"
+    LOGNAME="$TMPUSER"
+    TERM="${TERM:-xterm}"
+    LANG="${LANG:-C.UTF-8}"
+    PATH="${BROKER_PID:+$TMPHOME/.bin:}$TMPTFS/usr/upper/local/bin:$TMPTFS/usr/upper/bin:/usr/local/bin:/usr/bin:/bin"
 )
+
+if [[ $USE_WAYLAND -eq 1 ]]; then
+    SESSION_ENV+=(
+        WAYLAND_DISPLAY="$WAYLAND_SOCK"
+        XDG_RUNTIME_DIR="$TMPHOME/.run"
+        WLR_BACKENDS=wayland
+        WLR_NO_HARDWARE_CURSORS=1
+        XDG_SESSION_TYPE=wayland
+    )
+fi
+
+INNER+=(env -i "${SESSION_ENV[@]}")
 
 if [[ $# -gt 0 ]]; then
     INNER+=("$@")

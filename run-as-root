@@ -32,8 +32,11 @@ s.sendmsg(
 s.shutdown(socket.SHUT_WR)
 
 raw = b""
-while chunk := s.recv(4096):
-    raw += chunk
+try:
+    while chunk := s.recv(4096):
+        raw += chunk
+except KeyboardInterrupt:
+    print("receivded keyboard interrupt.")
 
 try:
     resp = json.loads(raw.decode())

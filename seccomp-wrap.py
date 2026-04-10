@@ -19,8 +19,11 @@ def install_filter():
     lib.seccomp_init.restype                     = ctypes.c_void_p
     lib.seccomp_syscall_resolve_name.restype     = ctypes.c_int
     lib.seccomp_syscall_resolve_name.argtypes    = [ctypes.c_char_p]
-    lib.seccomp_rule_add.argtypes                = [ctypes.c_void_p, ctypes.c_uint32,
+    # use seccomp_rule_add_exact — same as seccomp_rule_add with arg_cnt=0
+    # but has a fixed (non-variadic) signature, which ctypes handles correctly
+    lib.seccomp_rule_add_exact.argtypes          = [ctypes.c_void_p, ctypes.c_uint32,
                                                     ctypes.c_int, ctypes.c_uint]
+    lib.seccomp_rule_add_exact.restype           = ctypes.c_int
     lib.seccomp_load.argtypes                    = [ctypes.c_void_p]
     lib.seccomp_release.argtypes                 = [ctypes.c_void_p]
 
@@ -88,7 +91,7 @@ def install_filter():
         nr = lib.seccomp_syscall_resolve_name(name)
         if nr < 0:
             continue  # unknown on this arch — skip silently
-        lib.seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), nr, 0)
+        lib.seccomp_rule_add_exact(ctx, SCMP_ACT_ERRNO(EPERM), nr, 0)
 
     ret = lib.seccomp_load(ctx)
     lib.seccomp_release(ctx)
