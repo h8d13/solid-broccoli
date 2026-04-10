@@ -8,7 +8,7 @@
 # The broker validates the command against the whitelist, runs it as root
 # with the session's actual terminal, and returns the exit code as JSON.
 
-import socket, os, sys, subprocess, json, signal, array, shutil, syslog, select
+import socket, os, sys, subprocess, json, signal, array, shutil, syslog, select, struct
 
 # detach from the terminal's process group so background reads don't
 # get SIGTTIN when an interactive command (e.g. pacman) reads from stdin
@@ -61,8 +61,28 @@ server.listen(5)
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
 
+def peer_uid(conn):
+    """Return the UID of the process on the other end of the socket."""
+    cred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+    _, peer_uid_, _ = struct.unpack("3i", cred)
+    return peer_uid_
+
+
 def handle(conn):
     with conn:
+        # verify the connecting process is the session user — no other UID may use the broker
+        try:
+            connecting_uid = peer_uid(conn)
+        except OSError as e:
+            syslog.syslog(syslog.LOG_WARNING, f"PEERCRED failed: {e}")
+            conn.sendall(json.dumps({"error": "identity check failed"}).encode() + b"\n")
+            return
+        if connecting_uid != uid:
+            syslog.syslog(syslog.LOG_WARNING,
+                f"REJECTED uid={connecting_uid} (expected {uid})")
+            conn.sendall(json.dumps({"error": "permission denied"}).encode() + b"\n")
+            return
+
         # receive JSON command + stdin/stdout/stderr FDs in one recvmsg call
         fds_arr    = array.array('i')
         cmsg_space = socket.CMSG_SPACE(3 * fds_arr.itemsize)

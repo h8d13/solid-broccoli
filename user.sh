@@ -548,10 +548,16 @@ done
 # mask /proc files that reveal host hardware or kernel internals (nsjail pattern)
 for _f in /proc/cpuinfo /proc/version /proc/swaps /proc/diskstats /proc/partitions \
           /proc/kcore /proc/kallsyms /proc/kmsg /proc/sysrq-trigger \
-          /proc/iomem /proc/ioports; do
+          /proc/iomem /proc/ioports /proc/timer_list /proc/timer_stats \
+          /proc/interrupts /proc/devices; do
     [ -e \"\$_f\" ] && mount --bind /dev/null \"\$_f\"
 done
 mount --bind $TMPTFS/meminfo /proc/meminfo
+
+# mask /proc dirs that expose hardware or driver info
+for _d in /proc/bus /proc/acpi /proc/scsi /proc/tty/drivers; do
+    [ -e \"\$_d\" ] && mount -t tmpfs -o ro,nosuid,nodev,noexec tmpfs \"\$_d\"
+done
 
 exec \"\$@\""
 
