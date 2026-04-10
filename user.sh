@@ -451,8 +451,11 @@ mount -t overlay overlay -o nosuid,nodev,lowerdir=/var/cache/pacman,upperdir=$TM
 # fresh sysfs — respects our net namespace for /sys/class/net
 mount -t sysfs -o nosuid,nodev,noexec sysfs /sys
 # mask hardware-identifying sysfs paths (GPU, PCI, firmware, DMI, power telemetry)
+# drm + pci are left exposed in standalone wayland mode so seatd/wlroots can enumerate devices
 for _d in /sys/class/drm /sys/bus/pci /sys/firmware /sys/kernel/debug /sys/kernel/security; do
-    [ -d \"\$_d\" ] && mount -t tmpfs -o nosuid,nodev,noexec tmpfs \"\$_d\"
+    [ -d \"\$_d\" ] || continue
+    [ -n "$SEATD_SOCK" ] && { [ \"\$_d\" = /sys/class/drm ] || [ \"\$_d\" = /sys/bus/pci ]; } && continue
+    mount -t tmpfs -o nosuid,nodev,noexec tmpfs \"\$_d\"
 done
 
 # mask /proc files that reveal host hardware or kernel internals (nsjail pattern)
