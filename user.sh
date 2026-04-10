@@ -117,7 +117,7 @@ cleanup() {
         umount "/run/user/$TMPUID/$WAYLAND_SOCK" 2>/dev/null || true
     fi
     [[ $USE_WAYLAND -eq 1 ]] && rm -rf "/run/user/$TMPUID" 2>/dev/null || true
-    [[ -n "$SEATD_SOCK" ]]  && rm -f  "$SEATD_SOCK"       2>/dev/null || true
+    [[ -n "$SEATD_PID" ]]   && rm -f  "$SEATD_SOCK"       2>/dev/null || true
     umount "$TMPHOME/.imut" 2>/dev/null || true
     umount "$TMPHOME"  2>/dev/null || true
     umount "$TMPTFS"   2>/dev/null || true
@@ -288,15 +288,17 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
         chmod 777 "$HOST_XDG/$WAYLAND_SOCK"
         echo ">> wayland : nested ($WAYLAND_SOCK from $HOST_XDG)"
     else
-        # standalone: start seatd on the host with a per-session socket
-        SEATD_SOCK="/run/seatd-$SANDBOX_ID.sock"
+        # standalone: start seatd on the host (socket is always /run/seatd.sock)
+        SEATD_SOCK="/run/seatd.sock"
         groupadd seat 2>/dev/null || true
         usermod -aG seat "$TMPUSER" 2>/dev/null || true
-        seatd -s "$SEATD_SOCK" -g seat -l silent &
-        SEATD_PID=$!
-        for _i in {1..20}; do [[ -S "$SEATD_SOCK" ]] && break; sleep 0.1; done
-        [[ -S "$SEATD_SOCK" ]] || echo "warning: seatd failed to start" >&2
-        echo ">> wayland : standalone (seatd pid: $SEATD_PID, sock: $SEATD_SOCK)"
+        if [[ ! -S "$SEATD_SOCK" ]]; then
+            seatd -g seat -l silent &
+            SEATD_PID=$!
+            for _i in {1..20}; do [[ -S "$SEATD_SOCK" ]] && break; sleep 0.1; done
+            [[ -S "$SEATD_SOCK" ]] || echo "warning: seatd failed to start" >&2
+        fi
+        echo ">> wayland : standalone (seatd sock: $SEATD_SOCK)"
     fi
 
     # add tmpuser to video + render groups for DRM/KMS access
