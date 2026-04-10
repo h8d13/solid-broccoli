@@ -170,8 +170,8 @@ mkdir -p "$TMPTFS/etc/upper"      "$TMPTFS/etc/work"
 mkdir -p "$TMPTFS/varlib/upper"   "$TMPTFS/varlib/work"
 mkdir -p "$TMPTFS/varcache/upper" "$TMPTFS/varcache/work"
 
-# runit service dirs — sv-available holds definitions, sv is active (runsvdir watches it)
-mkdir -p "$TMPTFS/sv" "$TMPTFS/sv-available"
+# runit service dir — runsvdir watches this, auto-starts everything inside
+mkdir -p "$TMPTFS/sv"
 
 mount -t overlay overlay \
     -o lowerdir=/etc/skel,upperdir="$TMPTFS/upper",workdir="$TMPTFS/work" \
@@ -192,6 +192,9 @@ chmod 700 "$TMPHOME"
 TMPUID=$(id -u "$TMPUSER")
 TMPGID=$(id -g "$TMPUSER")
 TMPHOSTNAME="sandbox-$SANDBOX_ID"
+
+# runsvdir creates supervise/ subdirs per service — needs to own the sv tree
+chown -R "${TMPUID}:${TMPGID}" "$TMPTFS/sv"
 
 if [[ $USE_NET_NS -eq 1 && $USE_ETH -eq 1 ]]; then
     echo "error: --no-net and --eth are mutually exclusive" >&2; exit 1
@@ -371,13 +374,23 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
         exit 1
     fi
 
-    # sway service definition (available but not auto-activated)
-    mkdir -p "$TMPTFS/sv-available/sway"
-    cat > "$TMPTFS/sv-available/sway/run" << 'EOF'
+    # sway service — auto-starts with runsvdir
+    mkdir -p "$TMPTFS/sv/sway"
+    cat > "$TMPTFS/sv/sway/run" << 'EOF'
 #!/bin/sh
 exec sway
 EOF
-    chmod +x "$TMPTFS/sv-available/sway/run"
+    chmod +x "$TMPTFS/sv/sway/run"
+    chown -R "${TMPUID}:${TMPGID}" "$TMPTFS/sv/sway"
+fi
+
+# ---------- sv control script ----------
+SV_SRC="$(dirname "$0")/sv"
+if [[ -f "$SV_SRC" ]]; then
+    mkdir -p "$TMPHOME/.bin"
+    cp "$SV_SRC" "$TMPHOME/.bin/sv"
+    chmod +x "$TMPHOME/.bin/sv"
+    chown -R "${TMPUID}:${TMPGID}" "$TMPHOME/.bin"
 fi
 
 # ---------- broker ----------
@@ -402,7 +415,6 @@ if [[ ${#WHITELIST[@]} -gt 0 ]]; then
     [[ -f "$CLIENT_SRC" ]] || { echo "error: run-as-root not found next to user.sh" >&2; exit 1; }
     mkdir -p "$TMPHOME/.bin"
     sed "s|__BROKER_SOCK__|$BROKER_SOCK|g" "$CLIENT_SRC" > "$TMPHOME/.bin/run-as-root"
-
     chmod +x "$TMPHOME/.bin/run-as-root"
     chown -R "${TMPUSER}:${TMPUSER}" "$TMPHOME/.bin"
 
@@ -481,13 +493,13 @@ SESSION_ENV=(
     LOGNAME="$TMPUSER"
     TERM="${TERM:-xterm}"
     LANG="${LANG:-C.UTF-8}"
-    PATH="${BROKER_PID:+$TMPHOME/.bin:}$TMPTFS/usr/upper/local/bin:$TMPTFS/usr/upper/bin:/usr/local/bin:/usr/bin:/bin"
+    PATH="$TMPHOME/.bin:$TMPTFS/usr/upper/local/bin:$TMPTFS/usr/upper/bin:/usr/local/bin:/usr/bin:/bin"
     LD_LIBRARY_PATH="$TMPTFS/usr/upper/lib"
     XDG_DATA_DIRS="$TMPTFS/usr/upper/share:/usr/local/share:/usr/share"
     XKB_CONFIG_ROOT="$TMPTFS/usr/upper/share/xkeyboard-config-2"
     LIBINPUT_QUIRKS_DIR="/usr/share/libinput"
     SVDIR="$TMPTFS/sv"
-    SVDIR_AVAILABLE="$TMPTFS/sv-available"
+    SUPERVISE_PY="$TMPTFS/supervise.py"
 )
 
 if [[ $USE_WAYLAND -eq 1 ]]; then
@@ -516,17 +528,20 @@ INNER+=(env -i "${SESSION_ENV[@]}")
 
 if [[ $# -gt 0 ]]; then
     INNER+=("$@")
-elif command -v runsvdir &>/dev/null; then
-    # write a tiny init: supervised services in background, interactive shell in foreground
+else
+    # supervised init: runsvdir manages services, bash --login is the interactive session;
+    # when bash exits the PID namespace dies and kills runsvdir + all services
+    SUPERVISE_SRC="$(dirname "$0")/supervise.py"
+    [[ -f "$SUPERVISE_SRC" ]] || { echo "error: supervise.py not found next to user.sh" >&2; exit 1; }
+    cp "$SUPERVISE_SRC" "$TMPTFS/supervise.py"
+
     cat > "$TMPTFS/init.sh" << EOF
 #!/bin/bash
-runsvdir "$TMPTFS/sv" &
+python3 "$TMPTFS/supervise.py" "$TMPTFS/sv" &
 exec /bin/bash --login
 EOF
     chmod +x "$TMPTFS/init.sh"
     INNER+=("$TMPTFS/init.sh")
-else
-    INNER+=(/bin/bash --login)
 fi
 
 # outer: runs as root inside the new namespace — mount fresh /tmp and
