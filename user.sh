@@ -9,6 +9,8 @@
 #   --bind  <src>:<dst>  bind-mount src read-only into session home at dst
 #   --no-net             isolated loopback-only network namespace
 #   --eth                veth pair + bridge with a random ULA IPv6 address
+#   --port  <h:c>        forward host port h → session port c (requires --eth, repeatable)
+#   --cap   <name>       raise an ambient capability in the session (repeatable)
 #   --allow <cmd>        whitelist a command the session can run as root (repeatable)
 #   --                   end of options; everything after is the program + args
 
@@ -26,6 +28,8 @@ BIND_MOUNTS=()
 USE_NET_NS=0
 USE_ETH=0
 WHITELIST=()
+AMBIENT_CAPS=()
+PORT_MAPS=()
 ETH_BRIDGE=""
 ETH_NETNS=""
 ETH_VETH_HOST=""
@@ -43,9 +47,11 @@ while [[ $# -gt 0 ]]; do
         --mem)    MEM_LIMIT="$2";      shift 2 ;;
         --files)  MAX_FILES="$2";      shift 2 ;;
         --bind)   BIND_MOUNTS+=("$2"); shift 2 ;;
-        --no-net) USE_NET_NS=1;        shift   ;;
-        --eth)    USE_ETH=1;           shift   ;;
-        --allow)  WHITELIST+=("$2");   shift 2 ;;
+        --no-net) USE_NET_NS=1;              shift   ;;
+        --eth)    USE_ETH=1;                 shift   ;;
+        --port)   PORT_MAPS+=("$2");         shift 2 ;;
+        --cap)    AMBIENT_CAPS+=("$2");      shift 2 ;;
+        --allow)  WHITELIST+=("$2");         shift 2 ;;
         --)       shift; break ;;
         *)        break ;;
     esac
@@ -76,6 +82,11 @@ cleanup() {
         done
     fi
     userdel "$TMPUSER" 2>/dev/null || true
+    for pm in "${PORT_MAPS[@]}"; do
+        hp="${pm%%:*}"; cp_="${pm#*:}"
+        iptables -t nat -D PREROUTING  -p tcp --dport "$hp" -j DNAT --to-destination "${ETH_IPV4_CONT}:${cp_}" 2>/dev/null || true
+        iptables      -D FORWARD       -p tcp -d "$ETH_IPV4_CONT" --dport "$cp_" -j ACCEPT 2>/dev/null || true
+    done
     if [[ -n "$ETH_HOST_IF4" && -n "$ETH_IPV4_NET" ]]; then
         iptables  -t nat -D POSTROUTING -s "$ETH_IPV4_NET" -o "$ETH_HOST_IF4" -j MASQUERADE 2>/dev/null || true
         iptables  -D FORWARD -i "$ETH_BRIDGE"    -o "$ETH_HOST_IF4" -j ACCEPT 2>/dev/null || true
@@ -132,6 +143,9 @@ TMPHOSTNAME="sandbox-$SANDBOX_ID"
 
 if [[ $USE_NET_NS -eq 1 && $USE_ETH -eq 1 ]]; then
     echo "error: --no-net and --eth are mutually exclusive" >&2; exit 1
+fi
+if [[ ${#PORT_MAPS[@]} -gt 0 && $USE_ETH -eq 0 ]]; then
+    echo "error: --port requires --eth" >&2; exit 1
 fi
 
 # ---------- veth + bridge (--eth) ----------
@@ -202,6 +216,13 @@ if [[ $USE_ETH -eq 1 ]]; then
     else
         echo "warning: no default IPv6 route on host — outbound IPv6 will not work" >&2
     fi
+
+    # ---------- port forwarding (host → session) ----------
+    for pm in "${PORT_MAPS[@]}"; do
+        hp="${pm%%:*}"; cp_="${pm#*:}"
+        iptables -t nat -A PREROUTING  -p tcp --dport "$hp" -j DNAT --to-destination "${ETH_IPV4_CONT}:${cp_}"
+        iptables      -A FORWARD       -p tcp -d "$ETH_IPV4_CONT" --dport "$cp_" -j ACCEPT
+    done
 fi
 
 # ---------- persistent .imut ----------
@@ -275,12 +296,20 @@ Dirty:                 0 kB
 EOF
 
 # ---------- namespace wrapper ----------
-UNSHARE=(unshare --fork --pid --mount-proc --mount --uts)
+UNSHARE=(unshare --fork --pid --mount-proc --mount --uts --cgroup)
 [[ $USE_NET_NS -eq 1 ]] && UNSHARE+=(--net)
 
+# ---------- capability flags ----------
+# Build inheritable + ambient sets from --cap options
+INH_CAPS="-all"
+AMBIENT_FLAGS=()
+for cap in "${AMBIENT_CAPS[@]}"; do
+    INH_CAPS+=",+$cap"
+    AMBIENT_FLAGS+=(--ambient-caps="+$cap")
+done
+
 # ---------- sandboxed command ----------
-# inner: apply resource limits then drop privileges and exec the session program
-# prlimit is used instead of ulimit so limits apply only to the child, not user.sh
+# inner: apply resource limits, drop privileges, optionally install seccomp, then exec
 INNER=(
     prlimit
         "--as=$MEM_BYTES"
@@ -290,11 +319,22 @@ INNER=(
         --reuid="$TMPUID"
         --regid="$TMPGID"
         --init-groups
-        --inh-caps=-all
+        --inh-caps="$INH_CAPS"
+        "${AMBIENT_FLAGS[@]}"
         --bounding-set=-all
         --no-new-privs
         --pdeathsig=SIGKILL
         --
+)
+
+# inject seccomp filter if seccomp-wrap.py is present next to user.sh
+SECCOMP_SRC="$(dirname "$0")/seccomp-wrap.py"
+if [[ -f "$SECCOMP_SRC" ]]; then
+    cp "$SECCOMP_SRC" "$TMPTFS/seccomp-wrap.py"
+    INNER+=(python3 "$TMPTFS/seccomp-wrap.py" --)
+fi
+
+INNER+=(
     env -i
         HOME="$TMPHOME"
         USER="$TMPUSER"
@@ -362,11 +402,16 @@ if [[ $USE_ETH -eq 1 ]]; then
     echo ">> net     : veth (bridge: $ETH_BRIDGE)"
     echo ">>   ipv4  : $ETH_IPV4_HOST  <->  $ETH_IPV4_CONT"
     echo ">>   ipv6  : $ETH_IPV6_HOST  <->  $ETH_IPV6_CONT"
+    for pm in "${PORT_MAPS[@]}"; do
+        echo ">>   port  : host:${pm%%:*} -> session:${pm#*:}"
+    done
 elif [[ $USE_NET_NS -eq 1 ]]; then
     echo ">> net     : isolated (loopback only)"
 else
     echo ">> net     : host"
 fi
+[[ ${#AMBIENT_CAPS[@]} -gt 0 ]] && echo ">> caps    : ${AMBIENT_CAPS[*]}"
+[[ -f "$SECCOMP_SRC" ]]         && echo ">> seccomp : denylist active"
 echo ""
 
 set +e
