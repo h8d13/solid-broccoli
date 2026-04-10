@@ -378,7 +378,7 @@ done
 # inner: apply resource limits, drop privileges, optionally install seccomp, then exec
 INNER=(
     prlimit
-        "--as=$MEM_BYTES"
+        $([[ $USE_WAYLAND -eq 0 ]] && echo "--as=$MEM_BYTES")
         "--nofile=$MAX_FILES"
         --
     setpriv
@@ -410,6 +410,7 @@ SESSION_ENV=(
     LD_LIBRARY_PATH="$TMPTFS/usr/upper/lib"
     XDG_DATA_DIRS="$TMPTFS/usr/upper/share:/usr/local/share:/usr/share"
     XKB_CONFIG_ROOT="$TMPTFS/usr/upper/share/xkeyboard-config-2"
+    LIBINPUT_QUIRKS_DIR="$TMPTFS/usr/upper/share/libinput"
 )
 
 if [[ $USE_WAYLAND -eq 1 ]]; then
