@@ -303,6 +303,8 @@ mount -t overlay overlay -o lowerdir=/usr,upperdir=$TMPTFS/usr/upper,workdir=$TM
 mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir=$TMPTFS/pacman/upper,workdir=$TMPTFS/pacman/work,index=off /var/lib/pacman
 mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir=$TMPTFS/cache/upper,workdir=$TMPTFS/cache/work,index=off /var/cache/pacman
 mount -t sysfs sysfs /sys
+mount -t tmpfs tmpfs /sys/class/drm
+mount -t tmpfs tmpfs /sys/bus/pci
 mount --bind /dev/null /proc/cpuinfo
 mount --bind /dev/null /proc/version
 exec \"\$@\""
