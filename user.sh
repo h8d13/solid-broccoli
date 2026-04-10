@@ -171,7 +171,7 @@ mkdir -p "$TMPTFS/varlib/upper"   "$TMPTFS/varlib/work"
 mkdir -p "$TMPTFS/varcache/upper" "$TMPTFS/varcache/work"
 
 mount -t overlay overlay \
-    -o lowerdir=/etc/skel,upperdir="$TMPTFS/upper",workdir="$TMPTFS/work" \
+    -o "lowerdir=/etc/skel,upperdir=$TMPTFS/upper,workdir=$TMPTFS/work" \
     "$TMPHOME"
 
 # ---------- create user (no wheel, no sudo) ----------
@@ -395,7 +395,7 @@ if [[ ${#WHITELIST[@]} -gt 0 ]]; then
     disown $BROKER_PID
 
     # wait for socket to appear (up to 2s)
-    for i in {1..20}; do
+    for _ in {1..20}; do
         [[ -S "$BROKER_SOCK" ]] && break
         sleep 0.1
     done
@@ -508,6 +508,7 @@ fi
 # outer: runs as root inside the new namespace — mount fresh /tmp and
 # overlay /usr (shared upper dir with broker) so packages installed via
 # run-as-root are visible in the session, then hand off to INNER
+# shellcheck disable=SC1078,SC2027,SC1079
 SETUP="set -e
 echo $TMPHOSTNAME > /proc/sys/kernel/hostname
 

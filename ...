@@ -32,8 +32,8 @@ When bash exits the PID namespace dies, killing all background services instantl
 ### Root broker
 - `--allow <cmd>`: whitelists a command the session can run as root
 - `run-as-root <cmd>` inside the session sends the command to `broker.py` over a Unix socket
-- Broker runs the command inside a fresh mount namespace with the same overlays
-- Packages installed this way (e.g. pacman) are visible in the session immediately
+- Broker nsenter's the session's own mount namespace, then unshares a fresh PID namespace with a clean `/proc`
+- Commands run as root with full access to the session's live overlay — installed packages are visible immediately
 
 ## Services (sv)
 `sv` manages background processes inside the session:
