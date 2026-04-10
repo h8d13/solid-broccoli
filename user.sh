@@ -293,6 +293,7 @@ INNER=(
         --inh-caps=-all
         --bounding-set=-all
         --no-new-privs
+        --pdeathsig=SIGKILL
         --
     env -i
         HOME="$TMPHOME"
@@ -314,19 +315,33 @@ fi
 # run-as-root are visible in the session, then hand off to INNER
 SETUP="set -e
 echo $TMPHOSTNAME > /proc/sys/kernel/hostname
-mount -t tmpfs tmpfs /tmp
-mount -t overlay overlay -o lowerdir=/usr,upperdir=$TMPTFS/usr/upper,workdir=$TMPTFS/usr/work,index=off /usr
-mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir=$TMPTFS/pacman/upper,workdir=$TMPTFS/pacman/work,index=off /var/lib/pacman
-mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir=$TMPTFS/cache/upper,workdir=$TMPTFS/cache/work,index=off /var/cache/pacman
-mount -t sysfs sysfs /sys
-mount -t tmpfs tmpfs /sys/class/drm
-mount -t tmpfs tmpfs /sys/bus/pci
-mount --bind /dev/null /proc/cpuinfo
-mount --bind /dev/null /proc/version
+
+# isolate mount propagation — nothing we do here leaks to the host (nsjail: MS_REC|MS_PRIVATE on /)
+mount --make-rprivate /
+
+# tmp: nosuid+nodev so binaries dropped here can't escalate
+mount -t tmpfs -o nosuid,nodev,mode=1777 tmpfs /tmp
+
+# usr/pacman overlays: session writes land in RAM-backed upper, host lower is read-only
+mount -t overlay overlay -o nosuid,nodev,lowerdir=/usr,upperdir=$TMPTFS/usr/upper,workdir=$TMPTFS/usr/work,index=off /usr
+mount -t overlay overlay -o nosuid,nodev,lowerdir=/var/lib/pacman,upperdir=$TMPTFS/pacman/upper,workdir=$TMPTFS/pacman/work,index=off /var/lib/pacman
+mount -t overlay overlay -o nosuid,nodev,lowerdir=/var/cache/pacman,upperdir=$TMPTFS/cache/upper,workdir=$TMPTFS/cache/work,index=off /var/cache/pacman
+
+# fresh sysfs — respects our net namespace for /sys/class/net
+mount -t sysfs -o nosuid,nodev,noexec sysfs /sys
+# mask hardware-identifying sysfs paths (GPU, PCI, firmware, DMI, power telemetry)
+for _d in /sys/class/drm /sys/bus/pci /sys/firmware /sys/kernel/debug /sys/kernel/security; do
+    [ -d \"\$_d\" ] && mount -t tmpfs -o nosuid,nodev,noexec tmpfs \"\$_d\"
+done
+
+# mask /proc files that reveal host hardware or kernel internals (nsjail pattern)
+for _f in /proc/cpuinfo /proc/version /proc/swaps /proc/diskstats /proc/partitions \
+          /proc/kcore /proc/kallsyms /proc/kmsg /proc/sysrq-trigger \
+          /proc/iomem /proc/ioports; do
+    [ -e \"\$_f\" ] && mount --bind /dev/null \"\$_f\"
+done
 mount --bind $TMPTFS/meminfo /proc/meminfo
-mount --bind /dev/null /proc/swaps
-mount --bind /dev/null /proc/diskstats
-mount --bind /dev/null /proc/partitions
+
 exec \"\$@\""
 
 CMD=(
