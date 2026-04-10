@@ -11,8 +11,9 @@
 #   --eth                veth pair + bridge with a random ULA IPv6 address
 #   --port  <h:c>        forward host port h → session port c (requires --eth, repeatable)
 #   --cap   <name>       raise an ambient capability in the session (repeatable)
-#   --wayland            nested Wayland session (passes host socket + GPU render node)
+#   --wayland            Wayland compositor session (nested if host socket found, else standalone via seatd)
 #   --allow <cmd>        whitelist a command the session can run as root (repeatable)
+#   --clean              nuclear option: kill stale seatd, remove all tmpuser accounts and leftover dirs
 #   --                   end of options; everything after is the program + args
 
 set -euo pipefail
@@ -27,10 +28,12 @@ if [[ "${1:-}" == "--clean" ]]; then
     # kill stale seatd
     pkill -x seatd 2>/dev/null || true
     rm -f /run/seatd.sock
-    # remove stale tmpusers
-    while IFS=: read -r user _; do
+    # collect tmpuser UIDs before removing them (userdel erases them from /etc/passwd)
+    declare -A _TMPUIDS
+    while IFS=: read -r user _ uid _; do
         [[ "$user" == tmpuser_* ]] || continue
-        echo "   userdel $user"
+        _TMPUIDS["$uid"]=1
+        echo "   userdel $user (uid $uid)"
         userdel "$user" 2>/dev/null || true
     done < /etc/passwd
     # unmount + remove stale home/tfs dirs
@@ -40,10 +43,13 @@ if [[ "${1:-}" == "--clean" ]]; then
         rm -rf "$d"
         echo "   removed $d"
     done
-    # remove stale XDG runtime dirs for high UIDs (tmpusers)
-    for d in /run/user/*/; do
-        uid="${d%/}"; uid="${uid##*/}"
-        [[ "$uid" -ge 60000 ]] 2>/dev/null && { umount -R "$d" 2>/dev/null || true; rm -rf "$d"; echo "   removed $d"; } || true
+    # remove stale XDG runtime dirs belonging to tmpusers
+    for uid in "${!_TMPUIDS[@]}"; do
+        d="/run/user/$uid"
+        [[ -d "$d" ]] || continue
+        umount -R "$d" 2>/dev/null || true
+        rm -rf "$d"
+        echo "   removed $d"
     done
     echo ">> done"
     exit 0
@@ -60,6 +66,7 @@ AMBIENT_CAPS=()
 PORT_MAPS=()
 USE_WAYLAND=0
 WAYLAND_SOCK=""
+HOST_XDG=""
 SEATD_SOCK=""
 SEATD_PID=""
 DBUS_PID=""
