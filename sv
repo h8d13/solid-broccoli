@@ -39,7 +39,7 @@ fi
 if [[ "$CMD" == "setup" ]]; then
     [[ -d "$SVC" ]] && { echo "sv: $NAME: already exists"; exit 0; }
     mkdir -p "$SVC"
-    CMD_LINE="${@:3}"
+    CMD_LINE="${*:3}"
     printf '#!/bin/sh\nexec %s\n' "${CMD_LINE:-$NAME}" > "$SVC/run"
     chmod +x "$SVC/run"
     echo "$NAME: created ($SVC/run)"
