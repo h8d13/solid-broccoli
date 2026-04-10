@@ -380,7 +380,6 @@ TOOLS_DIR="$(dirname "$0")"
 for _tool in sv session-init; do
     [[ -f "$TOOLS_DIR/$_tool" ]] || { echo "error: $_tool not found next to user.sh" >&2; exit 1; }
     cp "$TOOLS_DIR/$_tool" "$TMPHOME/.bin/$_tool"
-    chmod +x "$TMPHOME/.bin/$_tool"
 done
 chown -R "${TMPUID}:${TMPGID}" "$TMPHOME/.bin"
 
@@ -405,7 +404,6 @@ if [[ ${#WHITELIST[@]} -gt 0 ]]; then
     CLIENT_SRC="$(dirname "$0")/run-as-root"
     [[ -f "$CLIENT_SRC" ]] || { echo "error: run-as-root not found next to user.sh" >&2; exit 1; }
     sed "s|__BROKER_SOCK__|$BROKER_SOCK|g" "$CLIENT_SRC" > "$TMPHOME/.bin/run-as-root"
-    chmod +x "$TMPHOME/.bin/run-as-root"
 
     echo ">> broker  : running (pid: $BROKER_PID)"
     echo ">> allowed : ${WHITELIST[*]}"
