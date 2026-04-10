@@ -415,22 +415,6 @@ case "$MEM_LIMIT" in
     *)  echo "error: --mem must end in M or G (e.g. 512M, 2G)" >&2; exit 1 ;;
 esac
 
-# ---------- fake /proc files ----------
-MEM_KB=$(( MEM_BYTES / 1024 ))
-cat > "$TMPTFS/meminfo" <<EOF
-MemTotal:       ${MEM_KB} kB
-MemFree:        ${MEM_KB} kB
-MemAvailable:   ${MEM_KB} kB
-Buffers:               0 kB
-Cached:                0 kB
-SwapCached:            0 kB
-Active:                0 kB
-Inactive:              0 kB
-SwapTotal:             0 kB
-SwapFree:              0 kB
-Dirty:                 0 kB
-EOF
-
 # ---------- namespace wrapper ----------
 UNSHARE=(unshare --fork --pid --mount-proc --mount --uts --cgroup)
 [[ $USE_NET_NS -eq 1 ]] && UNSHARE+=(--net)
@@ -549,11 +533,9 @@ done
 for _f in /proc/cpuinfo /proc/version /proc/swaps /proc/diskstats /proc/partitions \
           /proc/kcore /proc/kallsyms /proc/kmsg /proc/sysrq-trigger \
           /proc/iomem /proc/ioports /proc/timer_list /proc/timer_stats \
-          /proc/interrupts /proc/devices /proc/tty/drivers; do
+          /proc/interrupts /proc/devices /proc/tty/drivers /proc/meminfo; do
     [ -e \"\$_f\" ] && mount --bind /dev/null \"\$_f\"
 done
-mount --bind $TMPTFS/meminfo /proc/meminfo
-
 # mask /proc dirs that expose hardware or driver info
 for _d in /proc/bus /proc/acpi /proc/scsi; do
     [ -d \"\$_d\" ] && mount -t tmpfs -o ro,nosuid,nodev,noexec tmpfs \"\$_d\"
