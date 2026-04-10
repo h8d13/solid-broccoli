@@ -22,6 +22,33 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
+if [[ "${1:-}" == "--clean" ]]; then
+    echo ">> nuclear clean: removing all stale sandbox state"
+    # kill stale seatd
+    pkill -x seatd 2>/dev/null || true
+    rm -f /run/seatd.sock
+    # remove stale tmpusers
+    while IFS=: read -r user _; do
+        [[ "$user" == tmpuser_* ]] || continue
+        echo "   userdel $user"
+        userdel "$user" 2>/dev/null || true
+    done < /etc/passwd
+    # unmount + remove stale home/tfs dirs
+    for d in /var/tmp/home_* /var/tmp/tfs_*; do
+        [[ -e "$d" ]] || continue
+        umount -R "$d" 2>/dev/null || true
+        rm -rf "$d"
+        echo "   removed $d"
+    done
+    # remove stale XDG runtime dirs for high UIDs (tmpusers)
+    for d in /run/user/*/; do
+        uid="${d%/}"; uid="${uid##*/}"
+        [[ "$uid" -ge 60000 ]] 2>/dev/null && { umount -R "$d" 2>/dev/null || true; rm -rf "$d"; echo "   removed $d"; } || true
+    done
+    echo ">> done"
+    exit 0
+fi
+
 # ---------- defaults ----------
 MEM_LIMIT="512M"
 MAX_FILES=1024
