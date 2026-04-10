@@ -168,6 +168,7 @@ if [[ $USE_ETH -eq 1 ]]; then
     # IPv4 NAT
     ETH_HOST_IF4=$(ip route show default | awk 'NR==1{print $5}')
     if [[ -n "$ETH_HOST_IF4" ]]; then
+        echo 1 > /proc/sys/net/ipv4/ip_forward
         iptables -t nat -A POSTROUTING -s "$ETH_IPV4_NET" -o "$ETH_HOST_IF4" -j MASQUERADE
     else
         echo "warning: no default IPv4 route on host — outbound IPv4 will not work" >&2
