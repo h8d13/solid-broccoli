@@ -19,7 +19,7 @@ if [[ -d "$HOME/.imut/home" ]]; then
 fi
 
 # ---------- services ----------
-for _svc in "$SVDIR"/*/; do
+for _svc in "$SVDIR"/*/ "$SVDIR_TEMP"/*/; do
     [[ -d "$_svc" && -x "$_svc/run" && ! -f "$_svc/down" ]] || continue
     "$_svc/run" &
     echo $! > "$_svc/pid"

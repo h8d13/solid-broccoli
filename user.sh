@@ -169,7 +169,6 @@ mkdir -p "$TMPTFS/usr/upper"      "$TMPTFS/usr/work"
 mkdir -p "$TMPTFS/etc/upper"      "$TMPTFS/etc/work"
 mkdir -p "$TMPTFS/varlib/upper"   "$TMPTFS/varlib/work"
 mkdir -p "$TMPTFS/varcache/upper" "$TMPTFS/varcache/work"
-mkdir -p "$TMPTFS/sv"
 
 mount -t overlay overlay \
     -o lowerdir=/etc/skel,upperdir="$TMPTFS/upper",workdir="$TMPTFS/work" \
@@ -190,7 +189,10 @@ chmod 700 "$TMPHOME"
 TMPUID=$(id -u "$TMPUSER")
 TMPGID=$(id -g "$TMPUSER")
 TMPHOSTNAME="sandbox-$SANDBOX_ID"
-chown -R "${TMPUID}:${TMPGID}" "$TMPTFS/sv"
+
+# service dirs — persistent survives sessions, temp is gone on exit
+mkdir -p "$IMUT_DIR/sv"
+mkdir -p "$TMPTFS/sv"
 
 if [[ $USE_NET_NS -eq 1 && $USE_ETH -eq 1 ]]; then
     echo "error: --no-net and --eth are mutually exclusive" >&2; exit 1
@@ -468,7 +470,8 @@ SESSION_ENV=(
     XDG_DATA_DIRS="$TMPTFS/usr/upper/share:/usr/local/share:/usr/share"
     XKB_CONFIG_ROOT="$TMPTFS/usr/upper/share/xkeyboard-config-2"
     LIBINPUT_QUIRKS_DIR="/usr/share/libinput"
-    SVDIR="$TMPTFS/sv"
+    SVDIR="$TMPHOME/.imut/sv"
+    SVDIR_TEMP="$TMPTFS/sv"
 )
 
 if [[ $USE_WAYLAND -eq 1 ]]; then

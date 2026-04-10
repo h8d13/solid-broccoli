@@ -9,13 +9,20 @@
 #   down  presence prevents auto-start and marks service as stopped
 
 if [[ $# -lt 2 || -z "$SVDIR" ]]; then
-    echo "usage: sv <setup|start|stop|status> <name> [command...]" >&2
+    echo "usage: sv [--temp] <setup|start|stop|status> <name> [command...]" >&2
     exit 1
+fi
+
+# --temp uses the ephemeral service dir (gone on session exit)
+TARGET_DIR="$SVDIR"
+if [[ "$1" == "--temp" ]]; then
+    TARGET_DIR="${SVDIR_TEMP:?SVDIR_TEMP not set}"
+    shift
 fi
 
 CMD="$1"
 NAME="$2"
-SVC="$SVDIR/$NAME"
+SVC="$TARGET_DIR/$NAME"
 
 if [[ "$CMD" == "setup" ]]; then
     [[ -d "$SVC" ]] && { echo "sv: $NAME: already exists"; exit 0; }
@@ -29,7 +36,7 @@ if [[ "$CMD" == "setup" ]]; then
 fi
 
 if [[ ! -d "$SVC" ]]; then
-    echo "sv: $NAME: service not found (run: sv setup $NAME)" >&2
+    echo "sv: $NAME: service not found in $TARGET_DIR" >&2
     exit 1
 fi
 
