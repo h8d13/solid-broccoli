@@ -155,7 +155,7 @@ chmod 700 "$TMPHOME"
 # start in the sandbox home rather than inheriting the parent shell's cwd
 if [[ ! -f "$TMPHOME/.bash_profile" ]]; then
     printf 'cd "$HOME"\n' > "$TMPHOME/.bash_profile"
-    chown "${TMPUID}:${TMPGID}" "$TMPHOME/.bash_profile"
+    chown "${TMPUSER}:${TMPUSER}" "$TMPHOME/.bash_profile"
 fi
 
 TMPUID=$(id -u "$TMPUSER")
