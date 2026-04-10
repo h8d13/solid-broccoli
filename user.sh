@@ -335,15 +335,18 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     [[ -n "$VIDEO_GROUP" ]]  && usermod -aG "$VIDEO_GROUP"  "$TMPUSER" 2>/dev/null || true
     [[ -n "$RENDER_GROUP" ]] && usermod -aG "$RENDER_GROUP" "$TMPUSER" 2>/dev/null || true
 
-    # D-Bus session daemon — use dbus-launch with TMPDIR pointing to /run/user/$TMPUID
-    # so the socket lands there and is visible inside the session namespace
-    DBUS_LAUNCH_OUT=$(TMPDIR="/run/user/$TMPUID" dbus-launch --sh-syntax 2>/dev/null || true)
-    if [[ -n "$DBUS_LAUNCH_OUT" ]]; then
-        eval "$DBUS_LAUNCH_OUT"
-        DBUS_PID="${DBUS_SESSION_BUS_PID:-}"
-        echo ">> dbus    : session bus (pid: $DBUS_PID, addr: $DBUS_SESSION_BUS_ADDRESS)"
+    # D-Bus session daemon — socket in /run/user/$TMPUID so it's visible inside
+    # the session namespace (/tmp is remounted fresh, /run is not)
+    DBUS_SOCK="/run/user/$TMPUID/bus"
+    setpriv --reuid="$TMPUID" --regid="$TMPGID" --init-groups -- \
+        dbus-daemon --session --nopidfile --address="unix:path=$DBUS_SOCK" &
+    DBUS_PID=$!
+    for _i in {1..20}; do [[ -S "$DBUS_SOCK" ]] && break; sleep 0.1; done
+    if [[ -S "$DBUS_SOCK" ]]; then
+        DBUS_SESSION_BUS_ADDRESS="unix:path=$DBUS_SOCK"
+        echo ">> dbus    : session bus (pid: $DBUS_PID, sock: $DBUS_SOCK)"
     else
-        echo "warning: dbus-launch failed to start" >&2
+        echo "warning: dbus-daemon failed to start" >&2
     fi
 
     # Xwayland must be on the host — the /usr overlay lower dir surfaces it at
