@@ -22,17 +22,15 @@ except OSError as e:
     print(f"run-as-root: could not connect to broker: {e}", file=sys.stderr)
     sys.exit(1)
 
-# send JSON command + mount/pid namespace fds + stdin/stdout/stderr so the
-# broker can nsenter both namespaces and run directly against our terminal
+# send JSON command + mount namespace fd + stdin/stdout/stderr so the broker
+# can nsenter our mount namespace and run directly against our terminal
 mnt_fd = os.open("/proc/self/ns/mnt", os.O_RDONLY)
-pid_fd = os.open("/proc/self/ns/pid", os.O_RDONLY)
-fds = array.array('i', [mnt_fd, pid_fd, sys.stdin.fileno(), sys.stdout.fileno(), sys.stderr.fileno()])
+fds = array.array('i', [mnt_fd, sys.stdin.fileno(), sys.stdout.fileno(), sys.stderr.fileno()])
 s.sendmsg(
     [json.dumps(sys.argv[1:]).encode() + b"\n"],
     [(socket.SOL_SOCKET, socket.SCM_RIGHTS, fds)],
 )
 os.close(mnt_fd)
-os.close(pid_fd)
 # intentionally no shutdown(SHUT_WR) — keeping the connection open lets the
 # broker detect our disconnect (Ctrl+C → s.close()) and kill its subprocess
 

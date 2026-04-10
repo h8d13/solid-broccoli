@@ -73,9 +73,9 @@ def handle(conn):
             conn.sendall(json.dumps({"error": "permission denied"}).encode() + b"\n")
             return
 
-        # receive JSON command + mnt_fd + pid_fd + stdin/stdout/stderr FDs in one recvmsg call
+        # receive JSON command + mnt_fd + stdin/stdout/stderr FDs in one recvmsg call
         fds_arr    = array.array('i')
-        cmsg_space = socket.CMSG_SPACE(5 * fds_arr.itemsize)
+        cmsg_space = socket.CMSG_SPACE(4 * fds_arr.itemsize)
         try:
             msg, ancdata, _, _ = conn.recvmsg(65536, cmsg_space)
         except OSError as e:
@@ -85,8 +85,8 @@ def handle(conn):
         passed_fds = []
         for cmsg_level, cmsg_type, cmsg_data in ancdata:
             if cmsg_level == socket.SOL_SOCKET and cmsg_type == socket.SCM_RIGHTS:
-                fds_arr.frombytes(cmsg_data[:5 * fds_arr.itemsize])
-                passed_fds = list(fds_arr[:5])
+                fds_arr.frombytes(cmsg_data[:4 * fds_arr.itemsize])
+                passed_fds = list(fds_arr[:4])
 
         try:
             args = json.loads(msg.decode().strip())
@@ -109,22 +109,20 @@ def handle(conn):
             f"ALLOWED uid={uid} cmd={args}")
 
         # run with the session's actual stdin/stdout/stderr so interactive prompts work
-        if len(passed_fds) == 5:
-            mnt_fd, pid_fd, stdin_fd, stdout_fd, stderr_fd = passed_fds
+        if len(passed_fds) == 4:
+            mnt_fd, stdin_fd, stdout_fd, stderr_fd = passed_fds
         else:
-            mnt_fd, pid_fd, stdin_fd, stdout_fd, stderr_fd = None, None, 0, 1, 2
+            mnt_fd, stdin_fd, stdout_fd, stderr_fd = None, 0, 1, 2
 
-        # nsenter both the mount and PID namespaces so the command sees the session's
-        # overlay and a valid /proc/self — required for pacman to read mount points
-        if mnt_fd is not None and pid_fd is not None:
+        # nsenter the session's mount namespace (sees the full overlay), then
+        # unshare a fresh PID namespace + remount /proc so pacman can read
+        # /proc/self/mounts without hitting the session's PID-namespace-locked proc
+        if mnt_fd is not None:
             cmd_prefix = [
-                "nsenter",
-                f"--mount=/proc/self/fd/{mnt_fd}",
-                f"--pid=/proc/self/fd/{pid_fd}",
-                "--fork",
-                "--",
+                "nsenter", f"--mount=/proc/self/fd/{mnt_fd}", "--",
+                "unshare", "--mount", "--pid", "--fork", "--mount-proc", "--",
             ]
-            ns_fds = (mnt_fd, pid_fd)
+            ns_fds = (mnt_fd,)
         else:
             cmd_prefix = []
             ns_fds = ()
@@ -145,7 +143,7 @@ def handle(conn):
             conn.sendall(json.dumps({"error": str(e)}).encode() + b"\n")
             return
 
-        # namespace fds no longer needed — child has its own copies via pass_fds
+        # mnt_fd no longer needed — child has its own copy via pass_fds
         for fd in ns_fds:
             try:
                 os.close(fd)
