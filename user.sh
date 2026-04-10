@@ -176,8 +176,10 @@ if [[ $USE_ETH -eq 1 ]]; then
     # IPv6 NAT66 — preserve host RA so enabling forwarding doesn't drop the host's own IPv6 route
     ETH_HOST_IF=$(ip -6 route show default | awk 'NR==1{print $5}')
     if [[ -n "$ETH_HOST_IF" ]]; then
-        sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null
-        sysctl -w "net.ipv6.conf.${ETH_HOST_IF}.accept_ra=2" >/dev/null
+        echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
+        # accept_ra=2: keep accepting RAs even with forwarding on (prevents losing host's IPv6 default route)
+        [[ -f "/proc/sys/net/ipv6/conf/${ETH_HOST_IF}/accept_ra" ]] && \
+            echo 2 > "/proc/sys/net/ipv6/conf/${ETH_HOST_IF}/accept_ra"
         ip6tables -t nat -A POSTROUTING -s "$ETH_PREFIX" -o "$ETH_HOST_IF" -j MASQUERADE
     else
         echo "warning: no default IPv6 route on host — outbound IPv6 will not work" >&2
