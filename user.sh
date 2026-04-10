@@ -408,6 +408,7 @@ SESSION_ENV=(
     LANG="${LANG:-C.UTF-8}"
     PATH="${BROKER_PID:+$TMPHOME/.bin:}$TMPTFS/usr/upper/local/bin:$TMPTFS/usr/upper/bin:/usr/local/bin:/usr/bin:/bin"
     LD_LIBRARY_PATH="$TMPTFS/usr/upper/lib"
+    XDG_DATA_DIRS="$TMPTFS/usr/upper/share:/usr/local/share:/usr/share"
 )
 
 if [[ $USE_WAYLAND -eq 1 ]]; then
