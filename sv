@@ -9,7 +9,7 @@
 #   down  presence prevents auto-start and marks service as stopped
 
 if [[ $# -lt 2 || -z "$SVDIR" ]]; then
-    echo "usage: sv <start|stop|status> <name>" >&2
+    echo "usage: sv <setup|start|stop|status> <name> [command...]" >&2
     exit 1
 fi
 
@@ -17,8 +17,19 @@ CMD="$1"
 NAME="$2"
 SVC="$SVDIR/$NAME"
 
+if [[ "$CMD" == "setup" ]]; then
+    [[ -d "$SVC" ]] && { echo "sv: $NAME: already exists"; exit 0; }
+    mkdir -p "$SVC"
+    CMD_LINE="${@:3}"
+    printf '#!/bin/sh\nexec %s\n' "${CMD_LINE:-$NAME}" > "$SVC/run"
+    chmod +x "$SVC/run"
+    echo "$NAME: created ($SVC/run)"
+    echo "  edit $SVC/run if needed, then: sv start $NAME"
+    exit 0
+fi
+
 if [[ ! -d "$SVC" ]]; then
-    echo "sv: $NAME: service not found in $SVDIR" >&2
+    echo "sv: $NAME: service not found (run: sv setup $NAME)" >&2
     exit 1
 fi
 
