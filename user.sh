@@ -586,12 +586,6 @@ echo ""
 # prefer killing the session over host processes under memory pressure
 echo 200 > /proc/self/oom_score_adj
 
-# close any fds above stderr that user.sh may have opened (wayland socket
-# bind-mounts, broker pipe ends, etc.) so they don't leak into the session
-for _fd in /proc/self/fd/*; do
-    _n="${_fd##*/}"
-    [[ $_n -gt 2 ]] && exec {_n}<&- 2>/dev/null || true
-done
 
 set +e
 "${UNSHARE[@]}" "${CMD[@]}"
