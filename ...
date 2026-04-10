@@ -8,7 +8,7 @@ Every write is RAM-backed and gone on exit host filesystem is never touched.
 The goal was simply to run sway under a tmp user with some things backed in.
 
 ## Launch
-`sudo ./user.sh [options]` sets up the session:
+`sudo ./user [options]` sets up the session:
 - Creates a temporary user (`tmpuser_XXXX`) with a random name
 - Mounts a tmpfs-backed overlay on a fresh home dir (`/var/tmp/home_XXXX`)
 - Overlays `/usr`, `/etc`, `/var/lib`, `/var/cache` in RAM (shared with broker)
