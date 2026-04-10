@@ -29,7 +29,8 @@ s.sendmsg(
     [json.dumps(sys.argv[1:]).encode() + b"\n"],
     [(socket.SOL_SOCKET, socket.SCM_RIGHTS, fds)],
 )
-s.shutdown(socket.SHUT_WR)
+# intentionally no shutdown(SHUT_WR) — keeping the connection open lets the
+# broker detect our disconnect (Ctrl+C → s.close()) and kill its subprocess
 
 raw = b""
 try:

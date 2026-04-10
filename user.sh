@@ -109,7 +109,10 @@ cleanup() {
         ip link del "$ETH_BRIDGE"     2>/dev/null || true
     fi
     [[ -n "$ETH_NETNS" ]] && ip netns del "$ETH_NETNS" 2>/dev/null || true
-    [[ -n "$WAYLAND_SOCK" ]] && umount "$TMPHOME/.run/$WAYLAND_SOCK" 2>/dev/null || true
+    if [[ -n "$WAYLAND_SOCK" ]]; then
+        chmod 600 "$HOST_XDG/$WAYLAND_SOCK" 2>/dev/null || true
+        umount "$TMPHOME/.run/$WAYLAND_SOCK" 2>/dev/null || true
+    fi
     umount "$TMPHOME/.imut" 2>/dev/null || true
     umount "$TMPHOME"  2>/dev/null || true
     umount "$TMPTFS"   2>/dev/null || true
@@ -264,9 +267,11 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     chmod 700 "$SESSION_XDG"
     chown "${TMPUSER}:${TMPUSER}" "$SESSION_XDG"
 
-    # bind-mount the host Wayland socket in
+    # bind-mount the host Wayland socket in and open permissions so tmpuser can connect
+    # (compositor checks SO_PEERCRED uid — we need the socket world-accessible)
     touch "$SESSION_XDG/$WAYLAND_SOCK"
     mount --bind "$HOST_XDG/$WAYLAND_SOCK" "$SESSION_XDG/$WAYLAND_SOCK"
+    chmod 777 "$HOST_XDG/$WAYLAND_SOCK"
 
     # add tmpuser to the render group for GPU acceleration (render node, no KMS needed)
     RENDER_GROUP=$(stat -c %G /dev/dri/renderD128 2>/dev/null || true)

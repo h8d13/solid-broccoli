@@ -8,7 +8,7 @@
 # The broker validates the command against the whitelist, runs it as root
 # with the session's actual terminal, and returns the exit code as JSON.
 
-import socket, os, sys, subprocess, json, signal, array, shutil, syslog
+import socket, os, sys, subprocess, json, signal, array, shutil, syslog, select
 
 # detach from the terminal's process group so background reads don't
 # get SIGTTIN when an interactive command (e.g. pacman) reads from stdin
@@ -104,19 +104,45 @@ def handle(conn):
             stdin_fd, stdout_fd, stderr_fd = 0, 1, 2
 
         try:
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 ["unshare", "--mount", "bash", "-c", OVERLAY_SETUP, "--"] + args,
                 stdin=stdin_fd,
                 stdout=stdout_fd,
                 stderr=stderr_fd,
             )
-            syslog.syslog(syslog.LOG_INFO,
-                f"EXITED  uid={uid} cmd={args} exit={result.returncode}")
-            conn.sendall(json.dumps({"exit": result.returncode}).encode() + b"\n")
         except FileNotFoundError:
             conn.sendall(json.dumps({"error": f"command not found: {args[0]}"}).encode() + b"\n")
+            return
         except Exception as e:
             conn.sendall(json.dumps({"error": str(e)}).encode() + b"\n")
+            return
+
+        # Poll for client disconnect while the subprocess runs.
+        # run-as-root keeps the connection open (no shutdown), so any
+        # readability event here means the client closed (Ctrl+C).
+        try:
+            while proc.poll() is None:
+                r, _, _ = select.select([conn], [], [], 0.2)
+                if r:
+                    data = conn.recv(1)
+                    if not data:
+                        proc.kill()
+                        proc.wait()
+                        syslog.syslog(syslog.LOG_INFO,
+                            f"KILLED  uid={uid} cmd={args} (client disconnected)")
+                        return
+        except OSError:
+            proc.kill()
+            proc.wait()
+            return
+
+        returncode = proc.wait()
+        syslog.syslog(syslog.LOG_INFO,
+            f"EXITED  uid={uid} cmd={args} exit={returncode}")
+        try:
+            conn.sendall(json.dumps({"exit": returncode}).encode() + b"\n")
+        except OSError:
+            pass  # client already gone
         finally:
             for fd in passed_fds:
                 try:
