@@ -29,6 +29,8 @@ WHITELIST=()
 ETH_BRIDGE=""
 ETH_NETNS=""
 ETH_VETH_HOST=""
+ETH_HOST_IF=""
+ETH_PREFIX=""
 
 # ---------- parse options ----------
 while [[ $# -gt 0 ]]; do
@@ -69,6 +71,9 @@ cleanup() {
         done
     fi
     userdel "$TMPUSER" 2>/dev/null || true
+    if [[ -n "$ETH_HOST_IF" && -n "$ETH_PREFIX" ]]; then
+        ip6tables -t nat -D POSTROUTING -s "$ETH_PREFIX" -o "$ETH_HOST_IF" -j MASQUERADE 2>/dev/null || true
+    fi
     if [[ -n "$ETH_BRIDGE" ]]; then
         ip link set "$ETH_BRIDGE" down 2>/dev/null || true
         ip link del "$ETH_BRIDGE"     2>/dev/null || true
@@ -122,6 +127,7 @@ if [[ $USE_ETH -eq 1 ]]; then
 
     # random ULA prefix: fdXX:XXXX:XXXX::/64
     R=$(openssl rand -hex 6)
+    ETH_PREFIX="fd${R:0:2}:${R:2:4}:${R:6:4}::/64"
     ETH_IPV6_HOST="fd${R:0:2}:${R:2:4}:${R:6:4}::1"
     ETH_IPV6_CONT="fd${R:0:2}:${R:2:4}:${R:6:4}::2"
 
@@ -141,6 +147,15 @@ if [[ $USE_ETH -eq 1 ]]; then
     ip netns exec "$ETH_NETNS" ip link set eth0 up
     ip netns exec "$ETH_NETNS" ip -6 addr add "${ETH_IPV6_CONT}/64" dev eth0
     ip netns exec "$ETH_NETNS" ip -6 route add default via "$ETH_IPV6_HOST" dev eth0
+
+    # NAT66: masquerade the sandbox prefix through the host's default IPv6 interface
+    ETH_HOST_IF=$(ip -6 route show default | awk 'NR==1{print $5}')
+    if [[ -z "$ETH_HOST_IF" ]]; then
+        echo "warning: no default IPv6 route on host — outbound IPv6 will not work" >&2
+    else
+        sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null
+        ip6tables -t nat -A POSTROUTING -s "$ETH_PREFIX" -o "$ETH_HOST_IF" -j MASQUERADE
+    fi
 fi
 
 # ---------- persistent .imut ----------
