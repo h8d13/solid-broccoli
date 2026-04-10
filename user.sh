@@ -33,6 +33,7 @@ AMBIENT_CAPS=()
 PORT_MAPS=()
 USE_WAYLAND=0
 WAYLAND_SOCK=""
+SEATD_SOCK=""
 ETH_BRIDGE=""
 ETH_NETNS=""
 ETH_VETH_HOST=""
@@ -283,8 +284,11 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
         chmod 777 "$HOST_XDG/$WAYLAND_SOCK"
         echo ">> wayland : nested ($WAYLAND_SOCK from $HOST_XDG)"
     else
-        # standalone: sway will create its own socket in XDG_RUNTIME_DIR
-        echo ">> wayland : standalone (no host socket found)"
+        # standalone: start seatd inside the namespace for DRM seat management
+        SEATD_SOCK="/run/seatd-$SANDBOX_ID.sock"
+        groupadd seat 2>/dev/null || true
+        usermod -aG seat "$TMPUSER" 2>/dev/null || true
+        echo ">> wayland : standalone (seatd: $SEATD_SOCK)"
     fi
 
     # add tmpuser to video + render groups for DRM/KMS access
@@ -408,6 +412,12 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
             WLR_BACKENDS=wayland
             WLR_NO_HARDWARE_CURSORS=1
         )
+    else
+        # standalone: use seatd for DRM access
+        SESSION_ENV+=(
+            LIBSEAT_BACKEND=seatd
+            SEATD_SOCK="$SEATD_SOCK"
+        )
     fi
 fi
 
@@ -451,6 +461,9 @@ for _f in /proc/cpuinfo /proc/version /proc/swaps /proc/diskstats /proc/partitio
     [ -e \"\$_f\" ] && mount --bind /dev/null \"\$_f\"
 done
 mount --bind $TMPTFS/meminfo /proc/meminfo
+
+# standalone wayland: start seatd for DRM/input seat management
+[ -n "$SEATD_SOCK" ] && seatd -s "$SEATD_SOCK" -g seat -l silent 2>/dev/null &
 
 exec \"\$@\""
 
