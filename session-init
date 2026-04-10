@@ -1,10 +1,24 @@
 #!/bin/bash
 # session-init — ImutArch session entrypoint
 #
-# Starts any services defined in $SVDIR that don't have a 'down' file,
-# then hands off to an interactive bash session.
-# When bash exits the PID namespace dies, killing all background services.
+# 1. Wires persistent history and dotfiles from ~/.imut into the session home
+# 2. Starts any services defined in $SVDIR that don't have a 'down' file
+# 3. Execs bash --login — when it exits the PID namespace dies, killing everything
 
+# ---------- persistent shell history ----------
+touch "$HOME/.imut/history"
+ln -sf "$HOME/.imut/history" "$HOME/.bash_history"
+
+# ---------- persistent dotfiles ----------
+# anything in ~/.imut/home/ gets symlinked into $HOME
+if [[ -d "$HOME/.imut/home" ]]; then
+    for _src in "$HOME/.imut/home"/* "$HOME/.imut/home"/.[!.]*; do
+        [[ -e "$_src" ]] || continue
+        ln -sf "$_src" "$HOME/${_src##*/}"
+    done
+fi
+
+# ---------- services ----------
 for _svc in "$SVDIR"/*/; do
     [[ -d "$_svc" && -x "$_svc/run" && ! -f "$_svc/down" ]] || continue
     "$_svc/run" &
