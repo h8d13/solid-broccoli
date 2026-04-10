@@ -62,6 +62,7 @@ USE_WAYLAND=0
 WAYLAND_SOCK=""
 SEATD_SOCK=""
 SEATD_PID=""
+DBUS_PID=""
 ETH_BRIDGE=""
 ETH_NETNS=""
 ETH_VETH_HOST=""
@@ -109,6 +110,7 @@ cleanup() {
     echo ">> session ended — user, home, and all writes cleaned up"
     [[ -n "$BROKER_PID" ]] && kill "$BROKER_PID" 2>/dev/null || true
     [[ -n "$SEATD_PID" ]]  && kill "$SEATD_PID"  2>/dev/null || true
+    [[ -n "$DBUS_PID" ]]   && kill "$DBUS_PID"   2>/dev/null || true
     if [[ ${#BIND_MOUNTS[@]} -gt 0 ]]; then
         for bm in "${BIND_MOUNTS[@]}"; do
             dst="${bm#*:}"
@@ -333,6 +335,15 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     [[ -n "$VIDEO_GROUP" ]]  && usermod -aG "$VIDEO_GROUP"  "$TMPUSER" 2>/dev/null || true
     [[ -n "$RENDER_GROUP" ]] && usermod -aG "$RENDER_GROUP" "$TMPUSER" 2>/dev/null || true
 
+    # D-Bus session daemon — started as the session user so socket ownership is correct
+    # socket lives in /run/user/$TMPUID which is shared with the session namespace
+    DBUS_SOCK="/run/user/$TMPUID/bus"
+    DBUS_PID=$(runuser -u "$TMPUSER" -- \
+        dbus-daemon --session --fork --nopidfile \
+            --address="unix:path=$DBUS_SOCK" --print-pid 2>/dev/null || true)
+    [[ -n "$DBUS_PID" ]] && echo ">> dbus    : session bus (pid: $DBUS_PID, sock: $DBUS_SOCK)" \
+                         || echo "warning: dbus-daemon failed to start" >&2
+
     # Xwayland must be on the host — the /usr overlay lower dir surfaces it at
     # /usr/bin/Xwayland inside the session automatically; no staging needed
     if [[ ! -x /usr/bin/Xwayland ]]; then
@@ -453,6 +464,7 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     SESSION_ENV+=(
         XDG_RUNTIME_DIR="/run/user/$TMPUID"
         XDG_SESSION_TYPE=wayland
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TMPUID/bus"
     )
     if [[ -n "$WAYLAND_SOCK" ]]; then
         # nested: tell wlroots to use the forwarded socket
