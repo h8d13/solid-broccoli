@@ -40,10 +40,11 @@ When bash exits the PID namespace dies, killing all background services instantl
 `sv` manages background processes inside the session:
 
 ```
-sv setup <name> [command]   create a service (defaults to: exec <name>)
+sv setup  <name> [command]  create a service (defaults to: exec <name>)
 sv start  <name>            start it in the background
 sv stop   <name>            stop it
 sv status <name>            check if running
+sv delete <name>            stop and remove the service definition
 ```
 
 Services live in `$SVDIR/<name>/run`. A `down` file prevents auto-start.

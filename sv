@@ -1,7 +1,7 @@
 #!/bin/bash
 # sv — service control for ImutArch sessions
 #
-# Usage: sv <start|stop|status> <name>
+# Usage: sv <setup|start|stop|status|delete> <name>
 #
 # Services live in $SVDIR/<name>/:
 #   run   executable script that starts the service
@@ -23,6 +23,18 @@ fi
 CMD="$1"
 NAME="$2"
 SVC="$TARGET_DIR/$NAME"
+
+if [[ "$CMD" == "delete" ]]; then
+    [[ -d "$SVC" ]] || { echo "sv: $NAME: service not found in $TARGET_DIR" >&2; exit 1; }
+    pid=$(cat "$SVC/pid" 2>/dev/null)
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null
+        echo "$NAME: stopped (pid $pid)"
+    fi
+    rm -rf "$SVC"
+    echo "$NAME: deleted"
+    exit 0
+fi
 
 if [[ "$CMD" == "setup" ]]; then
     [[ -d "$SVC" ]] && { echo "sv: $NAME: already exists"; exit 0; }
@@ -67,7 +79,7 @@ case "$CMD" in
         fi
         ;;
     *)
-        echo "usage: sv <start|stop|status> <name>" >&2
+        echo "usage: sv [--temp] <setup|start|stop|status|delete> <name>" >&2
         exit 1
         ;;
 esac
