@@ -75,9 +75,13 @@ cleanup() {
     userdel "$TMPUSER" 2>/dev/null || true
     if [[ -n "$ETH_HOST_IF4" && -n "$ETH_IPV4_NET" ]]; then
         iptables  -t nat -D POSTROUTING -s "$ETH_IPV4_NET" -o "$ETH_HOST_IF4" -j MASQUERADE 2>/dev/null || true
+        iptables  -D FORWARD -i "$ETH_BRIDGE"    -o "$ETH_HOST_IF4" -j ACCEPT 2>/dev/null || true
+        iptables  -D FORWARD -i "$ETH_HOST_IF4"  -o "$ETH_BRIDGE"   -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
     fi
     if [[ -n "$ETH_HOST_IF" && -n "$ETH_PREFIX" ]]; then
         ip6tables -t nat -D POSTROUTING -s "$ETH_PREFIX"   -o "$ETH_HOST_IF"  -j MASQUERADE 2>/dev/null || true
+        ip6tables -D FORWARD -i "$ETH_BRIDGE"   -o "$ETH_HOST_IF"  -j ACCEPT 2>/dev/null || true
+        ip6tables -D FORWARD -i "$ETH_HOST_IF"  -o "$ETH_BRIDGE"   -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
     fi
     if [[ -n "$ETH_BRIDGE" ]]; then
         ip link set "$ETH_BRIDGE" down 2>/dev/null || true
@@ -170,6 +174,8 @@ if [[ $USE_ETH -eq 1 ]]; then
     if [[ -n "$ETH_HOST_IF4" ]]; then
         echo 1 > /proc/sys/net/ipv4/ip_forward
         iptables -t nat -A POSTROUTING -s "$ETH_IPV4_NET" -o "$ETH_HOST_IF4" -j MASQUERADE
+        iptables -A FORWARD -i "$ETH_BRIDGE" -o "$ETH_HOST_IF4" -j ACCEPT
+        iptables -A FORWARD -i "$ETH_HOST_IF4" -o "$ETH_BRIDGE" -m state --state RELATED,ESTABLISHED -j ACCEPT
     else
         echo "warning: no default IPv4 route on host — outbound IPv4 will not work" >&2
     fi
@@ -182,6 +188,8 @@ if [[ $USE_ETH -eq 1 ]]; then
         [[ -f "/proc/sys/net/ipv6/conf/${ETH_HOST_IF}/accept_ra" ]] && \
             echo 2 > "/proc/sys/net/ipv6/conf/${ETH_HOST_IF}/accept_ra"
         ip6tables -t nat -A POSTROUTING -s "$ETH_PREFIX" -o "$ETH_HOST_IF" -j MASQUERADE
+        ip6tables -A FORWARD -i "$ETH_BRIDGE" -o "$ETH_HOST_IF" -j ACCEPT
+        ip6tables -A FORWARD -i "$ETH_HOST_IF" -o "$ETH_BRIDGE" -m state --state RELATED,ESTABLISHED -j ACCEPT
     else
         echo "warning: no default IPv6 route on host — outbound IPv6 will not work" >&2
     fi
