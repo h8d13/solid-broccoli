@@ -404,7 +404,7 @@ if [[ ${#WHITELIST[@]} -gt 0 ]]; then
     CLIENT_SRC="$(dirname "$0")/run-as-root"
     [[ -f "$CLIENT_SRC" ]] || { echo "error: run-as-root not found next to user.sh" >&2; exit 1; }
     sed "s|__BROKER_SOCK__|$BROKER_SOCK|g" "$CLIENT_SRC" > "$TMPHOME/.bin/run-as-root"
-
+    chmod +x "$CLIENT_SRC"
     echo ">> broker  : running (pid: $BROKER_PID)"
     echo ">> allowed : ${WHITELIST[*]}"
 fi
