@@ -335,14 +335,16 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     [[ -n "$VIDEO_GROUP" ]]  && usermod -aG "$VIDEO_GROUP"  "$TMPUSER" 2>/dev/null || true
     [[ -n "$RENDER_GROUP" ]] && usermod -aG "$RENDER_GROUP" "$TMPUSER" 2>/dev/null || true
 
-    # D-Bus session daemon — run as the session user so the socket is owned correctly
-    # socket lives in /run/user/$TMPUID which is visible inside the session namespace
-    DBUS_SOCK="/run/user/$TMPUID/bus"
-    DBUS_PID=$(setpriv --reuid="$TMPUID" --regid="$TMPGID" --init-groups -- \
-        dbus-daemon --session --fork --address="unix:path=$DBUS_SOCK" --print-pid 2>/dev/null \
-        || true)
-    [[ -n "$DBUS_PID" ]] && echo ">> dbus    : session bus (pid: $DBUS_PID, sock: $DBUS_SOCK)" \
-                         || echo "warning: dbus-daemon failed to start" >&2
+    # D-Bus session daemon — use dbus-launch with TMPDIR pointing to /run/user/$TMPUID
+    # so the socket lands there and is visible inside the session namespace
+    DBUS_LAUNCH_OUT=$(TMPDIR="/run/user/$TMPUID" dbus-launch --sh-syntax 2>/dev/null || true)
+    if [[ -n "$DBUS_LAUNCH_OUT" ]]; then
+        eval "$DBUS_LAUNCH_OUT"
+        DBUS_PID="${DBUS_SESSION_BUS_PID:-}"
+        echo ">> dbus    : session bus (pid: $DBUS_PID, addr: $DBUS_SESSION_BUS_ADDRESS)"
+    else
+        echo "warning: dbus-launch failed to start" >&2
+    fi
 
     # Xwayland must be on the host — the /usr overlay lower dir surfaces it at
     # /usr/bin/Xwayland inside the session automatically; no staging needed
@@ -464,7 +466,7 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     SESSION_ENV+=(
         XDG_RUNTIME_DIR="/run/user/$TMPUID"
         XDG_SESSION_TYPE=wayland
-        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TMPUID/bus"
+        ${DBUS_SESSION_BUS_ADDRESS:+DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS"}
     )
     if [[ -n "$WAYLAND_SOCK" ]]; then
         # nested: tell wlroots to use the forwarded socket
