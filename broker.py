@@ -44,8 +44,8 @@ for entry in sys.argv[5:]:
 OVERLAY_SETUP = f"""set -e
 mount -t overlay overlay -o lowerdir=/usr,upperdir={tmptfs}/usr/upper,workdir={tmptfs}/usr/work,index=off /usr
 mount -t overlay overlay -o lowerdir=/etc,upperdir={tmptfs}/etc/upper,workdir={tmptfs}/etc/work,index=off /etc
-mount -t overlay overlay -o lowerdir=/var/lib/pacman,upperdir={tmptfs}/pacman/upper,workdir={tmptfs}/pacman/work,index=off /var/lib/pacman
-mount -t overlay overlay -o lowerdir=/var/cache/pacman,upperdir={tmptfs}/cache/upper,workdir={tmptfs}/cache/work,index=off /var/cache/pacman
+mount -t overlay overlay -o lowerdir=/var/lib,upperdir={tmptfs}/varlib/upper,workdir={tmptfs}/varlib/work,index=off /var/lib
+mount -t overlay overlay -o lowerdir=/var/cache,upperdir={tmptfs}/varcache/upper,workdir={tmptfs}/varcache/work,index=off /var/cache
 exec "$@"
 """
 
