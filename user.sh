@@ -338,6 +338,7 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     # D-Bus session daemon — socket in /run/user/$TMPUID so it's visible inside
     # the session namespace (/tmp is remounted fresh, /run is not)
     DBUS_SOCK="/run/user/$TMPUID/bus"
+    XDG_RUNTIME_DIR="/run/user/$TMPUID" \
     setpriv --reuid="$TMPUID" --regid="$TMPGID" --init-groups -- \
         dbus-daemon --session --nopidfile --address="unix:path=$DBUS_SOCK" &
     DBUS_PID=$!
