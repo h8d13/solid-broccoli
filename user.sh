@@ -379,7 +379,7 @@ SESSION_ENV=(
     LOGNAME="$TMPUSER"
     TERM="${TERM:-xterm}"
     LANG="${LANG:-C.UTF-8}"
-    PATH="${BROKER_PID:+$TMPHOME/.bin:}$TMPTFS/usr/upper/local/bin:$TMPTFS/usr/upper/bin:/usr/local/bin:/usr/bin:/bin"
+    PATH="${BROKER_PID:+$TMPHOME/.bin:}/usr/local/bin:/usr/bin:/bin"
 )
 
 if [[ $USE_WAYLAND -eq 1 ]]; then
