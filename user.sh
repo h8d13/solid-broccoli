@@ -62,7 +62,7 @@ USE_WAYLAND=0
 WAYLAND_SOCK=""
 SEATD_SOCK=""
 SEATD_PID=""
-DBUS_PID=""
+DBUS_USER_SERVICE=""
 ETH_BRIDGE=""
 ETH_NETNS=""
 ETH_VETH_HOST=""
@@ -110,7 +110,7 @@ cleanup() {
     echo ">> session ended — user, home, and all writes cleaned up"
     [[ -n "$BROKER_PID" ]] && kill "$BROKER_PID" 2>/dev/null || true
     [[ -n "$SEATD_PID" ]]  && kill "$SEATD_PID"  2>/dev/null || true
-    [[ -n "$DBUS_PID" ]]   && kill "$DBUS_PID"   2>/dev/null || true
+    [[ -n "$DBUS_USER_SERVICE" ]] && systemctl stop "$DBUS_USER_SERVICE" 2>/dev/null || true
     if [[ ${#BIND_MOUNTS[@]} -gt 0 ]]; then
         for bm in "${BIND_MOUNTS[@]}"; do
             dst="${bm#*:}"
@@ -335,19 +335,15 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     [[ -n "$VIDEO_GROUP" ]]  && usermod -aG "$VIDEO_GROUP"  "$TMPUSER" 2>/dev/null || true
     [[ -n "$RENDER_GROUP" ]] && usermod -aG "$RENDER_GROUP" "$TMPUSER" 2>/dev/null || true
 
-    # D-Bus session daemon — socket in /run/user/$TMPUID so it's visible inside
-    # the session namespace (/tmp is remounted fresh, /run is not)
-    DBUS_SOCK="/run/user/$TMPUID/bus"
-    XDG_RUNTIME_DIR="/run/user/$TMPUID" \
-    setpriv --reuid="$TMPUID" --regid="$TMPGID" --init-groups -- \
-        dbus-daemon --session --nopidfile --address="unix:path=$DBUS_SOCK" &
-    DBUS_PID=$!
-    for _i in {1..20}; do [[ -S "$DBUS_SOCK" ]] && break; sleep 0.1; done
-    if [[ -S "$DBUS_SOCK" ]]; then
-        DBUS_SESSION_BUS_ADDRESS="unix:path=$DBUS_SOCK"
-        echo ">> dbus    : session bus (pid: $DBUS_PID, sock: $DBUS_SOCK)"
+    # start systemd user instance for tmpuser — provides the user D-Bus bus
+    # at /run/user/$TMPUID/bus exactly as a real login session would
+    DBUS_USER_SERVICE="user@${TMPUID}.service"
+    systemctl start "$DBUS_USER_SERVICE" 2>/dev/null || true
+    for _i in {1..20}; do [[ -S "/run/user/$TMPUID/bus" ]] && break; sleep 0.1; done
+    if [[ -S "/run/user/$TMPUID/bus" ]]; then
+        echo ">> dbus    : systemd user bus ready (uid: $TMPUID)"
     else
-        echo "warning: dbus-daemon failed to start" >&2
+        echo "warning: systemd user instance failed to start" >&2
     fi
 
     # Xwayland must be on the host — the /usr overlay lower dir surfaces it at
@@ -470,7 +466,7 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     SESSION_ENV+=(
         XDG_RUNTIME_DIR="/run/user/$TMPUID"
         XDG_SESSION_TYPE=wayland
-        ${DBUS_SESSION_BUS_ADDRESS:+DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS"}
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TMPUID/bus"
     )
     if [[ -n "$WAYLAND_SOCK" ]]; then
         # nested: tell wlroots to use the forwarded socket
