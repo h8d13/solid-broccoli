@@ -283,9 +283,18 @@ if [[ $USE_ETH -eq 1 ]]; then
 fi
 
 # ---------- persistent .imut ----------
+# ensure history exists and is writable by any session user
+mkdir -p "$IMUT_DIR"
+touch "$IMUT_DIR/history"
+chmod 600 "$IMUT_DIR/history"
 mkdir -p "$TMPHOME/.imut"
 mount --bind "$IMUT_DIR" "$TMPHOME/.imut"
 chown "${TMPUSER}:${TMPUSER}" "$TMPHOME/.imut"
+# bind mount preserves real ownership — tmpuser can't write history unless we
+# bind the file itself over a writable copy in the overlay
+cp "$IMUT_DIR/history" "$TMPTFS/history"
+chmod 600 "$TMPTFS/history"
+mount --bind "$TMPTFS/history" "$TMPHOME/.imut/history"
 
 # ---------- read-only bind mounts ----------
 if [[ ${#BIND_MOUNTS[@]} -gt 0 ]]; then
