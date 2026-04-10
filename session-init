@@ -25,4 +25,5 @@ for _svc in "$SVDIR"/*/; do
     echo $! > "$_svc/pid"
 done
 
+cd "$HOME"
 exec /bin/bash --login
