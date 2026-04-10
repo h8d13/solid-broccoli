@@ -1,0 +1,14 @@
+#!/bin/bash
+# session-init — ImutArch session entrypoint
+#
+# Starts any services defined in $SVDIR that don't have a 'down' file,
+# then hands off to an interactive bash session.
+# When bash exits the PID namespace dies, killing all background services.
+
+for _svc in "$SVDIR"/*/; do
+    [[ -d "$_svc" && -x "$_svc/run" && ! -f "$_svc/down" ]] || continue
+    "$_svc/run" &
+    echo $! > "$_svc/pid"
+done
+
+exec /bin/bash --login

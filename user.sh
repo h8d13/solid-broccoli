@@ -169,6 +169,7 @@ mkdir -p "$TMPTFS/usr/upper"      "$TMPTFS/usr/work"
 mkdir -p "$TMPTFS/etc/upper"      "$TMPTFS/etc/work"
 mkdir -p "$TMPTFS/varlib/upper"   "$TMPTFS/varlib/work"
 mkdir -p "$TMPTFS/varcache/upper" "$TMPTFS/varcache/work"
+mkdir -p "$TMPTFS/sv"
 
 mount -t overlay overlay \
     -o lowerdir=/etc/skel,upperdir="$TMPTFS/upper",workdir="$TMPTFS/work" \
@@ -189,6 +190,7 @@ chmod 700 "$TMPHOME"
 TMPUID=$(id -u "$TMPUSER")
 TMPGID=$(id -g "$TMPUSER")
 TMPHOSTNAME="sandbox-$SANDBOX_ID"
+chown -R "${TMPUID}:${TMPGID}" "$TMPTFS/sv"
 
 if [[ $USE_NET_NS -eq 1 && $USE_ETH -eq 1 ]]; then
     echo "error: --no-net and --eth are mutually exclusive" >&2; exit 1
@@ -369,6 +371,16 @@ if [[ $USE_WAYLAND -eq 1 ]]; then
     fi
 fi
 
+# ---------- session tools (.bin) ----------
+mkdir -p "$TMPHOME/.bin"
+TOOLS_DIR="$(dirname "$0")"
+for _tool in sv session-init; do
+    [[ -f "$TOOLS_DIR/$_tool" ]] || { echo "error: $_tool not found next to user.sh" >&2; exit 1; }
+    cp "$TOOLS_DIR/$_tool" "$TMPHOME/.bin/$_tool"
+    chmod +x "$TMPHOME/.bin/$_tool"
+done
+chown -R "${TMPUID}:${TMPGID}" "$TMPHOME/.bin"
+
 # ---------- broker ----------
 if [[ ${#WHITELIST[@]} -gt 0 ]]; then
 
@@ -389,11 +401,8 @@ if [[ ${#WHITELIST[@]} -gt 0 ]]; then
     # install client into session — replace the placeholder socket path
     CLIENT_SRC="$(dirname "$0")/run-as-root"
     [[ -f "$CLIENT_SRC" ]] || { echo "error: run-as-root not found next to user.sh" >&2; exit 1; }
-    mkdir -p "$TMPHOME/.bin"
     sed "s|__BROKER_SOCK__|$BROKER_SOCK|g" "$CLIENT_SRC" > "$TMPHOME/.bin/run-as-root"
-
     chmod +x "$TMPHOME/.bin/run-as-root"
-    chown -R "${TMPUSER}:${TMPUSER}" "$TMPHOME/.bin"
 
     echo ">> broker  : running (pid: $BROKER_PID)"
     echo ">> allowed : ${WHITELIST[*]}"
@@ -470,11 +479,12 @@ SESSION_ENV=(
     LOGNAME="$TMPUSER"
     TERM="${TERM:-xterm}"
     LANG="${LANG:-C.UTF-8}"
-    PATH="${BROKER_PID:+$TMPHOME/.bin:}$TMPTFS/usr/upper/local/bin:$TMPTFS/usr/upper/bin:/usr/local/bin:/usr/bin:/bin"
+    PATH="$TMPHOME/.bin:$TMPTFS/usr/upper/local/bin:$TMPTFS/usr/upper/bin:/usr/local/bin:/usr/bin:/bin"
     LD_LIBRARY_PATH="$TMPTFS/usr/upper/lib"
     XDG_DATA_DIRS="$TMPTFS/usr/upper/share:/usr/local/share:/usr/share"
     XKB_CONFIG_ROOT="$TMPTFS/usr/upper/share/xkeyboard-config-2"
     LIBINPUT_QUIRKS_DIR="/usr/share/libinput"
+    SVDIR="$TMPTFS/sv"
 )
 
 if [[ $USE_WAYLAND -eq 1 ]]; then
@@ -504,7 +514,7 @@ INNER+=(env -i "${SESSION_ENV[@]}")
 if [[ $# -gt 0 ]]; then
     INNER+=("$@")
 else
-    INNER+=(/bin/bash --login)
+    INNER+=("$TMPHOME/.bin/session-init")
 fi
 
 # outer: runs as root inside the new namespace — mount fresh /tmp and
