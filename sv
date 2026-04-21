@@ -24,6 +24,17 @@ CMD="$1"
 NAME="$2"
 SVC="$TARGET_DIR/$NAME"
 
+# mutating ops take an exclusive lock on TARGET_DIR so concurrent sessions
+# (or parallel sv calls) don't race on setup/start/stop/delete. Status is
+# read-only and intentionally lock-free — slight staleness is acceptable.
+case "$CMD" in
+    setup|start|stop|delete)
+        mkdir -p "$TARGET_DIR"
+        exec 9>"$TARGET_DIR/.svlock"
+        flock 9
+        ;;
+esac
+
 if [[ "$CMD" == "delete" ]]; then
     [[ -d "$SVC" ]] || { echo "sv: $NAME: service not found in $TARGET_DIR" >&2; exit 1; }
     pid=$(cat "$SVC/pid" 2>/dev/null)

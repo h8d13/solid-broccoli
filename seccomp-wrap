@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
-seccomp-wrap.py — install a syscall denylist then exec into the session.
+seccomp-wrap — install a syscall denylist then exec into the session.
 Blocks syscalls commonly used for sandbox escape or privilege escalation.
-Falls back transparently if libseccomp is unavailable.
 
-Usage: python3 seccomp-wrap.py [--] program [args...]
-Installed into $TMPTFS at session start by user.sh.
+Usage: python3 seccomp-wrap [--strict] [--] program [args...]
+
+  --strict   abort (exit 1) if libseccomp is unavailable or the filter fails
+             to load. Default: warn on stderr and continue unfiltered.
+
+Installed into $TMPTFS at session start by user.
 """
 import ctypes, sys, os
 
@@ -101,8 +104,15 @@ def install_filter():
 
 def main():
     args = sys.argv[1:]
-    if args and args[0] == "--":
-        args = args[1:]
+    strict = False
+    while args:
+        if args[0] == "--strict":
+            strict = True
+            args = args[1:]
+            continue
+        if args[0] == "--":
+            args = args[1:]
+        break
     if not args:
         print("seccomp-wrap: no command given", file=sys.stderr)
         sys.exit(1)
@@ -110,7 +120,9 @@ def main():
     try:
         install_filter()
     except Exception as e:
-        # Fail open — don't abort the session if seccomp is unavailable
+        if strict:
+            print(f"seccomp-wrap: strict mode abort: {e}", file=sys.stderr)
+            sys.exit(1)
         print(f"seccomp-wrap: warning: {e}", file=sys.stderr)
 
     os.execvp(args[0], args)

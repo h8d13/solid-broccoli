@@ -2,14 +2,14 @@
 # run-as-root — session-side client for the root command broker
 #
 # Copied into the session's $HOME/.bin/ at launch time with the socket
-# path baked in. Sends a whitelisted command to broker.py and exits
+# path baked in. Sends a whitelisted command to broker and exits
 # with the command's exit code.
 #
 # Usage: run-as-root <command> [args...]
 
 import socket, sys, json, array, os
 
-SOCK = "__BROKER_SOCK__"  # replaced by user.sh at install time
+SOCK = "__BROKER_SOCK__"  # replaced by user at install time
 
 if len(sys.argv) < 2:
     print("usage: run-as-root <command> [args...]", file=sys.stderr)

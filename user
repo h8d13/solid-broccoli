@@ -1,7 +1,7 @@
 #!/bin/env bash
 # Spawn a sandboxed temporary session with an optional root command broker.
 #
-# Usage: sudo ./user.sh [options] [-- program [args...]]
+# Usage: sudo ./user [options] [-- program [args...]]
 #
 # Options:
 #   --mem   <size>       virtual memory limit e.g. 512M (default: 512M)
@@ -14,6 +14,7 @@
 #   --cap   <name>       raise an ambient capability in the session (repeatable)
 #   --wayland            Wayland compositor session (nested if host socket found, else standalone via seatd)
 #   --allow <cmd>        whitelist a command the session can run as root (repeatable)
+#   --strict-seccomp     abort if libseccomp is unavailable (default: warn, continue unfiltered)
 #   --clean              nuclear option: kill stale seatd, remove all tmpuser accounts and leftover dirs
 #   --                   end of options; everything after is the program + args
 
@@ -67,6 +68,7 @@ WHITELIST=()
 AMBIENT_CAPS=()
 PORT_MAPS=()
 USE_WAYLAND=0
+STRICT_SECCOMP=0
 WAYLAND_SOCK=""
 HOST_XDG=""
 SEATD_SOCK=""
@@ -95,6 +97,7 @@ while [[ $# -gt 0 ]]; do
         --port)   PORT_MAPS+=("$2");         shift 2 ;;
         --cap)    AMBIENT_CAPS+=("$2");      shift 2 ;;
         --wayland) USE_WAYLAND=1;           shift   ;;
+        --strict-seccomp) STRICT_SECCOMP=1; shift   ;;
         --allow)  WHITELIST+=("$2");         shift 2 ;;
         --)       shift; break ;;
         *)        break ;;
@@ -385,7 +388,7 @@ fi
 mkdir -p "$TMPHOME/.bin"
 TOOLS_DIR="$(dirname "$0")"
 for _tool in sv session-init; do
-    [[ -f "$TOOLS_DIR/$_tool" ]] || { echo "error: $_tool not found next to user.sh" >&2; exit 1; }
+    [[ -f "$TOOLS_DIR/$_tool" ]] || { echo "error: $_tool not found next to user" >&2; exit 1; }
     cp "$TOOLS_DIR/$_tool" "$TMPHOME/.bin/$_tool"
     chmod +x "$TMPHOME/.bin/$_tool"
 done
@@ -394,10 +397,26 @@ chown -R "${TMPUID}:${TMPGID}" "$TMPHOME/.bin"
 # ---------- broker ----------
 if [[ ${#WHITELIST[@]} -gt 0 ]]; then
 
-    BROKER_SCRIPT="$(dirname "$0")/broker.py"
-    [[ -f "$BROKER_SCRIPT" ]] || { echo "error: broker.py not found next to user.sh" >&2; exit 1; }
+    BROKER_SCRIPT="$(dirname "$0")/broker"
+    [[ -f "$BROKER_SCRIPT" ]] || { echo "error: broker not found next to user" >&2; exit 1; }
 
-    python3 "$BROKER_SCRIPT" "$BROKER_SOCK" "$TMPUID" "$TMPGID" "${WHITELIST[@]}" &
+    # stage whitelisted binaries into a root-owned dir outside the session's
+    # /usr overlay. session (tmpuser) cannot write here, so cannot shadow a
+    # whitelisted cmd by dropping an evil /usr/bin/<cmd> in the overlay upper.
+    SANDBOX_BIN="$TMPTFS/sandbox-bin"
+    mkdir -m 0555 "$SANDBOX_BIN"
+    for _cmd in "${WHITELIST[@]}"; do
+        _src=$(command -v "$_cmd" 2>/dev/null) \
+            || { echo "error: --allow '$_cmd' not found in PATH" >&2; exit 1; }
+        _src=$(readlink -f "$_src")
+        [[ -f "$_src" && -x "$_src" ]] \
+            || { echo "error: --allow '$_cmd' resolved to non-executable '$_src'" >&2; exit 1; }
+        cp -p "$_src" "$SANDBOX_BIN/$(basename "$_src")"
+    done
+    chown -R root:root "$SANDBOX_BIN"
+    chmod -R a=rx "$SANDBOX_BIN"
+
+    python3 "$BROKER_SCRIPT" "$BROKER_SOCK" "$TMPUID" "$TMPGID" "$SANDBOX_BIN" &
     BROKER_PID=$!
     disown $BROKER_PID
 
@@ -410,7 +429,7 @@ if [[ ${#WHITELIST[@]} -gt 0 ]]; then
 
     # install client into session — replace the placeholder socket path
     CLIENT_SRC="$(dirname "$0")/run-as-root"
-    [[ -f "$CLIENT_SRC" ]] || { echo "error: run-as-root not found next to user.sh" >&2; exit 1; }
+    [[ -f "$CLIENT_SRC" ]] || { echo "error: run-as-root not found next to user" >&2; exit 1; }
     sed "s|__BROKER_SOCK__|$BROKER_SOCK|g" "$CLIENT_SRC" > "$TMPHOME/.bin/run-as-root"
     chmod +x "$TMPHOME/.bin/run-as-root"
 
@@ -440,6 +459,12 @@ done
 
 # ---------- sandboxed command ----------
 # inner: apply resource limits, drop privileges, optionally install seccomp, then exec
+
+# prlimit --as caps virtual address space. Skipped under --wayland because GPU
+# drivers (DRM, Mesa) and wlroots reserve multi-GB virtual regions for buffer
+# pools and texture caches that exceed any reasonable --as limit even when RSS
+# stays small. For hard memory enforcement under Wayland, use an external
+# cgroup memory.max instead of prlimit.
 PRLIMIT_AS=()
 if [[ $USE_WAYLAND -eq 0 ]]; then PRLIMIT_AS=("--as=$MEM_BYTES"); fi
 
@@ -462,11 +487,17 @@ INNER=(
         --
 )
 
-# inject seccomp filter if seccomp-wrap.py is present next to user.sh
-SECCOMP_SRC="$(dirname "$0")/seccomp-wrap.py"
+# inject seccomp filter if seccomp-wrap is present next to user
+SECCOMP_SRC="$(dirname "$0")/seccomp-wrap"
 if [[ -f "$SECCOMP_SRC" ]]; then
-    cp "$SECCOMP_SRC" "$TMPTFS/seccomp-wrap.py"
-    INNER+=(python3 "$TMPTFS/seccomp-wrap.py" --)
+    cp "$SECCOMP_SRC" "$TMPTFS/seccomp-wrap"
+    SECCOMP_ARGS=(python3 "$TMPTFS/seccomp-wrap")
+    [[ $STRICT_SECCOMP -eq 1 ]] && SECCOMP_ARGS+=(--strict)
+    SECCOMP_ARGS+=(--)
+    INNER+=("${SECCOMP_ARGS[@]}")
+elif [[ $STRICT_SECCOMP -eq 1 ]]; then
+    echo "error: --strict-seccomp set but seccomp-wrap not found next to user" >&2
+    exit 1
 fi
 
 SESSION_ENV=(

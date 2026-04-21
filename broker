@@ -1,43 +1,48 @@
 #!/usr/bin/env python3
-# broker.py — root-side command broker for user.sh
+# broker — root-side command broker for user
 #
-# Usage: python3 broker.py <sock_path> <uid> <gid> <cmd> [<cmd> ...]
+# Usage: python3 broker <sock_path> <uid> <gid> <sandbox_bin_dir>
 #
 # Listens on a Unix socket owned by the session user. Each connection sends
 # a JSON array of args + the session's mount ns fd + stdin/stdout/stderr via
 # SCM_RIGHTS. The broker enters the session's mount namespace with nsenter so
 # commands see the session's overlay directly (packages installed via pacman
 # are immediately visible). Returns the exit code as JSON.
+#
+# Whitelist = basenames of executable files staged in <sandbox_bin_dir> by
+# the host-side user script. Staging is a root-owned 0555 dir outside the
+# session's /usr overlay tree, so tmpuser cannot shadow a whitelisted binary
+# by writing to the overlay's upper dir. Residual risk: the binaries staged
+# here may dlopen libraries from the session's overlaid /usr/lib; a session
+# that shadows a library can still influence execution. Fully closing that
+# requires exec'ing in a chroot that doesn't see the session's overlay.
 
-import socket, os, sys, subprocess, json, signal, array, shutil, syslog, select, struct
+import socket, os, sys, subprocess, json, signal, array, syslog, select, struct
 
 # detach from the terminal's process group so background reads don't
 # get SIGTTIN when an interactive command (e.g. pacman) reads from stdin
 os.setsid()
 syslog.openlog(ident="sandbox-broker", facility=syslog.LOG_AUTH)
 
-sock_path = sys.argv[1]
-uid       = int(sys.argv[2])
-gid       = int(sys.argv[3])
+sock_path   = sys.argv[1]
+uid         = int(sys.argv[2])
+gid         = int(sys.argv[3])
+sandbox_bin = os.path.realpath(sys.argv[4])
 
+if not os.path.isdir(sandbox_bin):
+    print(f"broker: sandbox_bin dir not found: {sandbox_bin}", file=sys.stderr)
+    sys.exit(1)
 
-def resolve(cmd):
-    """Return the canonical real path of a command, or None if not found."""
-    if os.path.isabs(cmd):
-        p = cmd
-    else:
-        p = shutil.which(cmd)
-    return os.path.realpath(p) if p else None
-
-
-# resolve whitelist entries to full canonical paths at startup
+# whitelist = basenames of executable files in sandbox_bin (populated by user)
 whitelist = set()
-for entry in sys.argv[4:]:
-    path = resolve(entry)
-    if path and os.path.isfile(path):
-        whitelist.add(path)
-    else:
-        print(f"broker: warning: whitelisted command '{entry}' not found, skipping", file=sys.stderr)
+for entry in os.listdir(sandbox_bin):
+    full = os.path.join(sandbox_bin, entry)
+    if os.path.isfile(full) and os.access(full, os.X_OK):
+        whitelist.add(entry)
+
+if not whitelist:
+    print(f"broker: sandbox_bin dir is empty: {sandbox_bin}", file=sys.stderr)
+    sys.exit(1)
 
 if os.path.exists(sock_path):
     os.unlink(sock_path)
@@ -98,15 +103,19 @@ def handle(conn):
             conn.sendall(json.dumps({"error": "request must be a non-empty JSON array"}).encode() + b"\n")
             return
 
-        cmd_path = resolve(str(args[0]))
-        if not cmd_path or cmd_path not in whitelist:
+        req_name = os.path.basename(str(args[0]))
+        if req_name not in whitelist:
             syslog.syslog(syslog.LOG_WARNING,
                 f"DENIED  uid={uid} cmd={args}")
             conn.sendall(json.dumps({"error": f"'{args[0]}' is not whitelisted"}).encode() + b"\n")
             return
 
+        # exec from the sandbox_bin staging dir — session cannot shadow this
+        # path because it's outside the /usr overlay and owned root:root 0555
+        cmd_path = os.path.join(sandbox_bin, req_name)
         syslog.syslog(syslog.LOG_INFO,
-            f"ALLOWED uid={uid} cmd={args}")
+            f"ALLOWED uid={uid} cmd={args} resolved={cmd_path}")
+        args = [cmd_path] + list(args[1:])
 
         # run with the session's actual stdin/stdout/stderr so interactive prompts work
         if len(passed_fds) == 4:
