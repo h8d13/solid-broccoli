@@ -570,12 +570,14 @@ mount -t overlay overlay -o nosuid,nodev,lowerdir=/etc,upperdir=$TMPTFS/etc/uppe
 mount -t overlay overlay -o nosuid,nodev,lowerdir=/var/lib,upperdir=$TMPTFS/varlib/upper,workdir=$TMPTFS/varlib/work,index=off /var/lib
 mount -t overlay overlay -o nosuid,nodev,lowerdir=/var/cache,upperdir=$TMPTFS/varcache/upper,workdir=$TMPTFS/varcache/work,index=off /var/cache
 
-# shadow pacman hooks that need systemd/dbus (sandbox has neither) — override
-# in /etc/pacman.d/hooks/ with a never-matching trigger so pacman skips them
+# shadow pacman hooks that need systemd/dbus (sandbox has neither). match by
+# Exec line contents rather than filename — catches 30-systemd-*, *-dbus-*,
+# and any third-party hook that calls systemctl/busctl.
 if [ -d /usr/share/libalpm/hooks ]; then
     mkdir -p /etc/pacman.d/hooks
-    for _hf in /usr/share/libalpm/hooks/systemd-*.hook; do
+    for _hf in /usr/share/libalpm/hooks/*.hook; do
         [ -f \"\$_hf\" ] || continue
+        grep -qE '(^|[^[:alnum:]])(systemctl|systemd-|dbus-|busctl)' \"\$_hf\" || continue
         printf '[Trigger]\\nType = Path\\nOperation = Install\\nTarget = /__sandbox_disabled__\\n\\n[Action]\\nWhen = PostTransaction\\nExec = /bin/true\\n' > \"/etc/pacman.d/hooks/\$(basename \"\$_hf\")\"
     done
 fi
